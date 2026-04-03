@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>货位编码工具</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="header-main">
+        <h1>货位编码工具</h1>
+        <p>货位码编码 + Excel 导出 + 标签 PDF 导出</p>
+      </div>
+      <button type="button" id="openTutorialBtn" class="tutorial-open-btn">查看使用教程</button>
+    </header>
+
+    <section class="panel">
+      <div class="panel-title-row">
+        <h2>货架维度业务字段定义</h2>
+        <button id="addFieldBtn" type="button">新增业务字段</button>
+      </div>
+      <div id="fieldsContainer"></div>
+      <p class="hint">枚举值以英文逗号分隔；符号用于人工肉眼识别（如 R、NR、IF）。</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title-row">
+        <h2>区域与货架配置</h2>
+        <button id="addRegionBtn" type="button">新增区域</button>
+      </div>
+      <div id="regionsContainer"></div>
+    </section>
+
+    <section class="panel action-bar">
+      <button id="importExcelBtn" type="button">导入已编码货位 Excel</button>
+      <button id="exportExcelBtn" type="button" class="primary">导出货位码导入模板</button>
+      <button id="openPdfSettingsBtn" type="button" class="primary">导出货位码标签 PDF</button>
+    </section>
+    <input id="importExcelInput" type="file" accept=".xlsx,.xls" style="display:none;">
+  </div>
+
+  <aside id="miniMapPanel" class="mini-map expanded">
+    <div class="mini-map-header">
+      <strong>区域缩略图</strong>
+      <button id="toggleMiniMapBtn" type="button">收起</button>
+    </div>
+    <div class="mini-map-toolbar">
+      <label for="miniMapViewFieldSelect">视图字段</label>
+      <select id="miniMapViewFieldSelect"></select>
+      <p class="mini-map-interaction-hint">货架：单击选中并定位工作区；拖拽框选；Ctrl/Cmd+点击加选；有选中时右键可批量改当前视图字段。</p>
+    </div>
+    <div id="miniMapContent" class="mini-map-content"></div>
+    <div id="miniMapRubberBand" class="mini-map-rubber-band" hidden aria-hidden="true"></div>
+    <div id="miniMapContextMenu" class="mini-map-context-menu" hidden role="menu"></div>
+  </aside>
+
+  <dialog id="pdfSettingsDialog">
+    <form method="dialog" id="pdfSettingsForm">
+      <h3>标签打印设置</h3>
+
+      <div class="pdf-dialog-body">
+        <div class="pdf-form-column">
+          <div class="form-grid">
+            <label>标签尺寸模式
+              <select id="labelSizeMode">
+                <option value="custom">自定义(mm)</option>
+                <option value="a4">A4</option>
+                <option value="a3">A3</option>
+              </select>
+            </label>
+            <label>纸张尺寸模式
+              <select id="paperSizeMode">
+                <option value="custom">自定义(mm)</option>
+                <option value="a4" selected>A4</option>
+                <option value="a3">A3</option>
+              </select>
+            </label>
+            <label>标签宽(mm)
+              <input id="labelWidth" type="number" min="10" step="1" value="90">
+            </label>
+            <label>标签高(mm)
+              <input id="labelHeight" type="number" min="10" step="1" value="60">
+            </label>
+            <label>纸张宽(mm)
+              <input id="paperWidth" type="number" min="10" step="1" value="210">
+            </label>
+            <label>纸张高(mm)
+              <input id="paperHeight" type="number" min="10" step="1" value="297">
+            </label>
+            <label>排布方向
+              <select id="layoutDirection">
+                <option value="vertical">上下排布</option>
+                <option value="horizontal">左右排布</option>
+              </select>
+            </label>
+            <label>上下排布时：顶部内容
+              <select id="verticalTopContent">
+                <option value="barcode">条码在上</option>
+                <option value="text">编码在上</option>
+              </select>
+            </label>
+            <label>左右排布时：左侧内容
+              <select id="horizontalLeftContent">
+                <option value="barcode">条码在左</option>
+                <option value="text">编码在左</option>
+              </select>
+            </label>
+            <label>编码字体大小(pt)
+              <input id="codeFontSize" type="number" min="8" max="72" value="24">
+            </label>
+            <label>区域-货架连接符
+              <input id="sepRegionShelf" type="text" maxlength="2" value="-">
+            </label>
+            <label>货架-层级连接符
+              <input id="sepShelfLevel" type="text" maxlength="2" value="-">
+            </label>
+            <label>层级-货道连接符
+              <input id="sepLevelAisle" type="text" maxlength="2" value="-">
+            </label>
+          </div>
+      <p class="hint">连接符输入空格将被视为换行（仅作用于标签上可见编码文本）。</p>
+        </div>
+        <div class="pdf-preview-column">
+          <p class="pdf-preview-title">打印预览（示意，与导出 PDF 排版一致）</p>
+          <div id="pdfPreviewHost" class="pdf-preview-host" aria-live="polite"></div>
+        </div>
+      </div>
+
+      <div class="dialog-actions">
+        <button type="button" id="cancelPdfBtn">取消</button>
+        <button type="submit" id="confirmPdfBtn" class="primary">生成 PDF</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="exportExcelDialog">
+    <div class="export-excel-dialog">
+      <h3>导出 Excel · 选择列</h3>
+      <p class="hint export-excel-hint">勾选需要导出的列；左侧 <strong>⠿</strong> 为拖动手柄，可调整导出顺序（A、B、C 列会随之变化）。右侧为导出后在 Excel 中的<strong>列号</strong>（第 1 行为表头，<strong>A 列</strong>为最左列）。</p>
+      <div id="exportExcelColumnList" class="export-excel-column-list"></div>
+      <div class="dialog-actions">
+        <button type="button" id="exportExcelSelectAllBtn">全选</button>
+        <button type="button" id="exportExcelSelectNoneBtn">全不选</button>
+        <button type="button" id="cancelExportExcelBtn">取消</button>
+        <button type="button" id="confirmExportExcelBtn" class="primary">导出</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="tutorialDialog" class="tutorial-dialog-shell">
+    <div class="tutorial-dialog">
+      <h3>使用教程</h3>
+      <div class="tutorial-body">
+        <section class="tutorial-section">
+          <h4>一、工具能做什么</h4>
+          <p>在浏览器里配置<strong>区域—货架—层级—货道</strong>的货位结构，维护每个货位的业务属性；可<strong>导出 Excel 模板</strong>供外部填写或对接系统，也可<strong>从 Excel 回写</strong>到本工具；还能按当前配置<strong>批量生成货位码标签 PDF</strong>（含 CODE128 条码），适合打印贴纸。</p>
+        </section>
+        <section class="tutorial-section">
+          <h4>二、货位编码怎么组成</h4>
+          <p>每个货位对应一条编码字符串，由四段依次拼接而成（中间连接符可在 PDF 设置里改，默认短横线）：</p>
+          <ul>
+            <li><strong>区域编号</strong>：区域名称，如 <code>A</code></li>
+            <li><strong>货架编号</strong>：货架代码，如 <code>01</code></li>
+            <li><strong>层级编号</strong>：行号，两位，如 <code>01</code>～<code>99</code></li>
+            <li><strong>货道编号</strong>：列号，两位，如 <code>01</code>～<code>99</code></li>
+          </ul>
+          <p class="tutorial-example">示例（默认连接符）：<code>A-01-05-06</code> 表示 A 区、01 号货架、第 5 行、第 6 列货道。</p>
+          <p class="tutorial-note">PDF 里若把某连接符打成<strong>空格</strong>，标签上的<strong>可见文字</strong>会在该处换行；条码仍使用不含换行的连续字符串。</p>
+        </section>
+        <section class="tutorial-section">
+          <h4>三、业务字段（货架维度）</h4>
+          <p>在「货架维度业务字段定义」中可<strong>新增 / 编辑 / 删除</strong>字段。每个字段包括：</p>
+          <ul>
+            <li><strong>字段名</strong>：导出 Excel 时的列名。</li>
+            <li><strong>枚举值</strong>：英文逗号分隔的选项列表。</li>
+            <li><strong>符号</strong>：与枚举一一对应，便于人工识别（如库区缩写）。</li>
+          </ul>
+          <p>配置货架时，每个货架要为这些字段各选一个枚举值。</p>
+        </section>
+        <section class="tutorial-section">
+          <h4>四、区域与货架</h4>
+          <ul>
+            <li><strong>新增区域</strong>：自动生成区域名（A、B、C…），可在卡片里改名。</li>
+            <li><strong>货架</strong>：可新增、复制、删除；每个区域至少保留一个货架。</li>
+            <li><strong>行数 / 列数</strong>：决定该货架下有多少个层级、货道，从而生成多少条货位。</li>
+            <li>点击货架卡片可选中；配合右侧缩略图可快速定位。</li>
+          </ul>
+        </section>
+        <section class="tutorial-section">
+          <h4>五、区域缩略图</h4>
+          <p>右侧面板按货架格子展示当前「视图字段」的取值；可<strong>收起 / 展开</strong>。</p>
+          <ul>
+            <li><strong>单击</strong>货架格：选中并滚动到对应货架配置。</li>
+            <li><strong>拖拽框选</strong>：批量选中多个货架格。</li>
+            <li><strong>Ctrl / Cmd + 单击</strong>：加减多选。</li>
+            <li>有选中时<strong>右键</strong>：可批量把选中格的「当前视图字段」改成同一枚举值。</li>
+          </ul>
+        </section>
+        <section class="tutorial-section">
+          <h4>六、导出货位码导入模板（Excel）</h4>
+          <ol>
+            <li>点击「导出货位码导入模板」。</li>
+            <li>在弹窗中<strong>勾选</strong>要导出的列；用左侧 <strong>⠿</strong> 拖动手柄可<strong>调整列顺序</strong>（A、B、C… 列标签会随之更新）。</li>
+            <li>「全选 / 全不选」可快速开关；至少选一列才能导出。</li>
+            <li>生成的表第一行为表头，每一行对应一个货位；除系统四列外，其余列为自定义业务字段。</li>
+          </ol>
+        </section>
+        <section class="tutorial-section">
+          <h4>七、导入已编码货位 Excel</h4>
+          <p class="tutorial-warning"><strong>注意：</strong>导入会按 Excel <strong>重建</strong>当前工具里的<strong>业务字段定义</strong>和<strong>区域 / 货架结构</strong>，相当于覆盖本地配置（导入前请确认已备份或无需保留当前编辑）。</p>
+          <ul>
+            <li>使用<strong>第一个工作表</strong>；第一行必须为表头。</li>
+            <li>表头<strong>必须包含</strong>四列：<code>区域编号</code>、<code>货架编号</code>、<code>层级编号</code>、<code>货道编号</code>（列名需与导出模板一致）。</li>
+            <li>其他列名会被识别为<strong>业务字段</strong>，并自动汇总枚举选项。</li>
+            <li>层级、货道为数字；异常值会按规则修正并可能在「导入结果校验」里给出警告。</li>
+            <li>空行、缺必填列的行会被跳过；导入结束后请查看弹窗中的摘要与明细。</li>
+          </ul>
+        </section>
+        <section class="tutorial-section">
+          <h4>八、导出货位码标签 PDF</h4>
+          <ol>
+            <li>点击「导出货位码标签 PDF」，在弹窗中设置标签尺寸、纸张尺寸、排布方向、条码与文字的左右/上下关系、编码字号、各段连接符等。</li>
+            <li>右侧为<strong>打印预览示意</strong>，与导出 PDF 排版一致。</li>
+            <li>确认后「生成 PDF」：每个货位<strong>单独一页</strong>，条码为 <strong>CODE128</strong>，便于一页一张标签纸打印。</li>
+          </ol>
+        </section>
+        <section class="tutorial-section">
+          <h4>九、数据保存在哪里</h4>
+          <p>配置会保存在本机浏览器的 <strong>localStorage</strong> 中（含区域、货架、字段、导出列选项、PDF 设置、缩略图是否收起等）。换浏览器或清理站点数据后需重新配置；重要数据请通过 Excel 导出备份。</p>
+        </section>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="closeTutorialBtn" class="primary">关闭</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="importReportDialog">
+    <div class="import-report-dialog">
+      <h3 id="importReportTitle">导入结果校验</h3>
+      <div id="importReportSummary" class="import-report-summary"></div>
+      <div id="importReportIssuesWrap" class="import-report-issues-wrap">
+        <h4 class="import-report-subtitle">明细</h4>
+        <ul id="importReportIssues" class="import-report-issues"></ul>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" id="importReportCloseBtn" class="primary">关闭</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

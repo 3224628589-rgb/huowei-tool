@@ -1,0 +1,872 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background: #f5f7fb;
+  color: #1f2937;
+}
+
+.container {
+  width: calc(100vw - 420px);
+  max-width: none;
+  margin: 0;
+  padding: 16px 18px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.header-main {
+  flex: 1;
+  min-width: 200px;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.header p {
+  margin: 8px 0 0;
+  color: #6b7280;
+}
+
+.tutorial-open-btn {
+  flex-shrink: 0;
+  margin-top: 2px;
+  border-color: #2563eb;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.tutorial-open-btn:hover {
+  background: #dbeafe;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 16px;
+  margin-top: 16px;
+}
+
+.panel-title-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+button {
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #111827;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #f3f4f6;
+}
+
+button.primary {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
+}
+
+button.primary:hover {
+  background: #1d4ed8;
+}
+
+.hint {
+  margin-top: 10px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+#fieldsContainer {
+  margin-top: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.field-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 2fr 2fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+input, select {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-size: 14px;
+}
+
+#regionsContainer {
+  margin-top: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.region-card {
+  border: 2px solid #93c5fd;
+  background: #f8fbff;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.region-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.region-title h3 {
+  margin: 0;
+}
+
+.shelves-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+}
+
+.shelf-card {
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.shelf-card.shelf-card-selected {
+  border-color: #2563eb;
+  background: #eff6ff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.35);
+}
+
+.shelf-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.shelf-title {
+  font-weight: 600;
+}
+
+.shelf-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.action-bar {
+  display: flex;
+  gap: 12px;
+}
+
+dialog {
+  border: none;
+  border-radius: 10px;
+  width: min(960px, 96vw);
+  max-height: 92vh;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* 高于 .mini-map (20)、右键菜单 (60) 等 fixed 层，避免遮挡弹窗导致无法点击「关闭」 */
+dialog[open] {
+  z-index: 10000;
+}
+
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 9999;
+}
+
+/* 未打开时必须隐藏：无条件 display:flex 会覆盖 UA 的 dialog:not([open]){display:none}，导致内容常驻页面底部 */
+#tutorialDialog.tutorial-dialog-shell:not([open]) {
+  display: none !important;
+}
+
+#tutorialDialog.tutorial-dialog-shell[open] {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 96vw);
+  max-height: 90vh;
+  padding: 0;
+}
+
+.tutorial-dialog {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  max-height: 90vh;
+}
+
+.tutorial-dialog > h3 {
+  margin: 0;
+  padding: 16px 18px 0;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.tutorial-body {
+  padding: 12px 18px 8px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  font-size: 14px;
+  line-height: 1.65;
+  color: #374151;
+}
+
+.tutorial-section {
+  margin-bottom: 20px;
+}
+
+.tutorial-section:last-child {
+  margin-bottom: 8px;
+}
+
+.tutorial-section h4 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: #111827;
+}
+
+.tutorial-section p {
+  margin: 0 0 10px;
+}
+
+.tutorial-section ul,
+.tutorial-section ol {
+  margin: 0 0 10px;
+  padding-left: 1.35em;
+}
+
+.tutorial-section li {
+  margin-bottom: 6px;
+}
+
+.tutorial-section li:last-child {
+  margin-bottom: 0;
+}
+
+.tutorial-section code {
+  font-size: 0.92em;
+  padding: 1px 5px;
+  background: #f3f4f6;
+  border-radius: 4px;
+  color: #1f2937;
+}
+
+.tutorial-example {
+  padding: 8px 10px;
+  background: #f0f9ff;
+  border-radius: 8px;
+  border: 1px solid #bae6fd;
+  font-size: 13px;
+}
+
+.tutorial-note {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.tutorial-warning {
+  padding: 10px 12px;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #92400e;
+}
+
+.tutorial-dialog .dialog-actions {
+  flex-shrink: 0;
+  padding: 12px 18px 16px;
+  border-top: 1px solid #e5e7eb;
+  margin-top: 0;
+}
+
+#exportExcelDialog {
+  width: min(520px, 94vw);
+  max-height: 88vh;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+}
+
+.export-excel-dialog {
+  padding: 16px 18px;
+}
+
+.export-excel-dialog h3 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.export-excel-hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.export-excel-column-list {
+  position: relative;
+  max-height: min(420px, 55vh);
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #fafafa;
+}
+
+.export-excel-drop-indicator {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 3px;
+  margin-top: -1px;
+  background: #2563eb;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.15), 0 2px 10px rgba(37, 99, 235, 0.35);
+  pointer-events: none;
+  z-index: 6;
+  transition: top 0.05s ease-out, opacity 0.08s ease;
+  opacity: 1;
+}
+
+.export-excel-drop-indicator[hidden] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.export-excel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px;
+  border-bottom: 1px solid #eee;
+  font-size: 14px;
+  background: #fff;
+}
+
+.export-excel-row--dragging {
+  opacity: 0.42;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.12);
+  z-index: 4;
+  position: relative;
+}
+
+.export-excel-drag-handle {
+  flex-shrink: 0;
+  width: 28px;
+  text-align: center;
+  cursor: grab;
+  user-select: none;
+  color: #9ca3af;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 0;
+  border-radius: 4px;
+}
+
+.export-excel-drag-handle:hover {
+  color: #4b5563;
+  background: #e5e7eb;
+}
+
+.export-excel-drag-handle:active {
+  cursor: grabbing;
+}
+
+.export-excel-row:last-child {
+  border-bottom: none;
+}
+
+.export-excel-row label {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  margin: 0;
+}
+
+.export-excel-col-badge {
+  flex-shrink: 0;
+  min-width: 52px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
+#importReportDialog {
+  width: min(560px, 94vw);
+  max-height: 85vh;
+  padding: 0;
+  border: none;
+  border-radius: 10px;
+}
+
+.import-report-dialog {
+  padding: 16px 18px;
+}
+
+#importReportDialog h3 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.import-report-subtitle {
+  margin: 12px 0 6px;
+  font-size: 14px;
+  color: #374151;
+}
+
+.import-report-summary {
+  font-size: 14px;
+  line-height: 1.6;
+  color: #1f2937;
+  padding: 10px 12px;
+  background: #f3f4f6;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+}
+
+.import-report-summary.import-report-error {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.import-report-summary.import-report-ok {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+.import-report-issues-wrap {
+  margin-top: 8px;
+}
+
+.import-report-issues {
+  margin: 0;
+  padding-left: 1.2em;
+  max-height: min(320px, 45vh);
+  overflow: auto;
+  font-size: 13px;
+  line-height: 1.55;
+  color: #374151;
+}
+
+.import-report-issues li {
+  margin-bottom: 6px;
+}
+
+.import-report-issues .issue-warn {
+  color: #b45309;
+}
+
+.import-report-issues .issue-skip {
+  color: #6b7280;
+}
+
+#pdfSettingsForm {
+  padding: 18px;
+  max-height: 92vh;
+  overflow: auto;
+}
+
+.pdf-dialog-body {
+  display: grid;
+  grid-template-columns: 1fr min(320px, 38vw);
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 800px) {
+  .pdf-dialog-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pdf-preview-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #4b5563;
+  font-weight: 600;
+}
+
+.pdf-preview-host {
+  background: #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.pdf-preview-paper {
+  position: relative;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  border: 1px solid #d1d5db;
+  flex-shrink: 0;
+}
+
+.pdf-preview-frame {
+  width: 100%;
+  height: 220px;
+  border: 0;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.pdf-preview-label {
+  position: absolute;
+  border: 1px solid #9ca3af;
+  box-sizing: border-box;
+  display: flex;
+  overflow: hidden;
+}
+
+.pdf-preview-label.vertical {
+  flex-direction: column;
+}
+
+.pdf-preview-label.horizontal {
+  flex-direction: row;
+}
+
+.pdf-preview-barcode {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.pdf-preview-barcode img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.pdf-preview-code {
+  font-family: Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.pdf-preview-code-line {
+  white-space: nowrap;
+  text-align: center;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+#pdfSettingsForm h3 {
+  margin-top: 0;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.badge {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.mini-map {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  width: 380px;
+  max-height: calc(100vh - 24px);
+  overflow: hidden;
+  border: 1px solid #374151;
+  border-radius: 10px;
+  background: #111827;
+  color: #f9fafb;
+  z-index: 20;
+  transition: width 0.2s ease;
+}
+
+.mini-map.collapsed {
+  width: 88px;
+}
+
+.mini-map-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #374151;
+}
+
+.mini-map-header button {
+  padding: 4px 8px;
+  font-size: 12px;
+  background: #1f2937;
+  color: #f9fafb;
+  border-color: #4b5563;
+}
+
+.mini-map-content {
+  padding: 10px;
+  overflow: auto;
+  max-height: calc(100vh - 170px);
+}
+
+.mini-map-toolbar {
+  padding: 8px 10px;
+  border-bottom: 1px solid #374151;
+  display: grid;
+  gap: 6px;
+}
+
+.mini-map-toolbar label {
+  font-size: 12px;
+  color: #d1d5db;
+}
+
+.mini-map-toolbar select {
+  background: #1f2937;
+  color: #f9fafb;
+  border-color: #4b5563;
+}
+
+.mini-map-interaction-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #9ca3af;
+}
+
+.mini-map.collapsed .mini-map-content {
+  display: none;
+}
+
+.mini-map.collapsed .mini-map-toolbar {
+  display: none;
+}
+
+.mini-region {
+  margin-bottom: 10px;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.mini-region-title {
+  font-size: 12px;
+  color: #93c5fd;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
+.mini-shelf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(62px, 1fr));
+  gap: 6px;
+}
+
+.mini-shelf {
+  border: 1px solid #6b7280;
+  border-radius: 6px;
+  font-size: 11px;
+  text-align: center;
+  padding: 6px 4px;
+  cursor: pointer;
+  background: #1f2937;
+  color: #0f172a;
+  min-height: 58px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+  position: relative;
+  transition: box-shadow 0.12s ease, outline 0.12s ease, transform 0.12s ease;
+  user-select: none;
+}
+
+.mini-shelf-selected {
+  outline: 3px solid #fbbf24;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px #111827, 0 0 12px rgba(251, 191, 36, 0.65);
+  z-index: 2;
+  transform: scale(1.02);
+}
+
+.mini-shelf-top {
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.mini-shelf-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: #1d4ed8;
+  line-height: 1.2;
+}
+
+.mini-shelf-sub {
+  font-size: 10px;
+  color: #1e3a8a;
+}
+
+.mini-shelf-bottom {
+  font-size: 10px;
+  line-height: 1.2;
+  color: #111827;
+  border-top: 1px dashed rgba(17, 24, 39, 0.25);
+  padding-top: 3px;
+  word-break: break-all;
+}
+
+.mini-shelf:hover,
+.mini-region-title:hover {
+  color: #bfdbfe;
+}
+
+.mini-map-rubber-band {
+  position: fixed;
+  border: 2px dashed #fbbf24;
+  background: rgba(251, 191, 36, 0.12);
+  pointer-events: none;
+  z-index: 50;
+  box-sizing: border-box;
+}
+
+.mini-map-context-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 180px;
+  max-height: min(70vh, 360px);
+  overflow: auto;
+  background: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 8px;
+  padding: 6px 0;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.45);
+}
+
+.mini-map-context-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: #f9fafb;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.mini-map-context-menu button:hover {
+  background: #374151;
+}
+
+.mini-map-context-menu .context-menu-title {
+  padding: 6px 14px 8px;
+  font-size: 11px;
+  color: #9ca3af;
+  border-bottom: 1px solid #374151;
+  margin-bottom: 4px;
+}
+
+.mini-map-context-menu .context-menu-empty {
+  padding: 10px 14px;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+body.mini-map-collapsed .container {
+  width: calc(100vw - 130px);
+}
+
+@media (max-width: 1200px) {
+  .mini-map {
+    width: 320px;
+  }
+  .container {
+    width: calc(100vw - 352px);
+  }
+}
+
+@media (max-width: 920px) {
+  .mini-map {
+    position: static;
+    width: calc(100vw - 24px);
+    margin: 12px;
+    max-height: none;
+  }
+  .container,
+  body.mini-map-collapsed .container {
+    width: 100vw;
+    padding: 12px;
+  }
+}
