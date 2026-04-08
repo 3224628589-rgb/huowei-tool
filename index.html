@@ -110,17 +110,17 @@
             <label>编码字体大小(pt)
               <input id="codeFontSize" type="number" min="8" max="72" value="24">
             </label>
-            <label>区域-货架连接符
+            <label>区域-货架连接符（仅影响标签文字）
               <input id="sepRegionShelf" type="text" maxlength="2" value="-">
             </label>
-            <label>货架-层级连接符
+            <label>货架-层级连接符（仅影响标签文字）
               <input id="sepShelfLevel" type="text" maxlength="2" value="-">
             </label>
-            <label>层级-货道连接符
+            <label>层级-货道连接符（仅影响标签文字）
               <input id="sepLevelAisle" type="text" maxlength="2" value="-">
             </label>
           </div>
-      <p class="hint">连接符输入空格将被视为换行（仅作用于标签上可见编码文本）。</p>
+      <p class="hint">连接符输入空格将被视为换行（仅作用于标签文字展示）。条码内容固定按「区域-货架-层级-货道」生成，不受连接符设置影响。</p>
         </div>
         <div class="pdf-preview-column">
           <p class="pdf-preview-title">打印预览（示意，与导出 PDF 排版一致）</p>
@@ -223,7 +223,7 @@
           <ol>
             <li>点击「导出货位码标签 PDF」，在弹窗中设置标签尺寸、纸张尺寸、排布方向、条码与文字的左右/上下关系、编码字号、各段连接符等。</li>
             <li>右侧为<strong>打印预览示意</strong>，与导出 PDF 排版一致。</li>
-            <li>确认后「生成 PDF」：每个货位<strong>单独一页</strong>，条码为 <strong>CODE128</strong>，便于一页一张标签纸打印。</li>
+            <li>确认后「生成 PDF」：每个货位<strong>单独一页</strong>，条码为 <strong>CODE128</strong>，便于一页一张标签纸打印。连接符设置仅影响标签文字显示，不改变条码内容。</li>
           </ol>
         </section>
         <section class="tutorial-section">
