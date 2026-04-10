@@ -1021,12 +1021,6 @@ function computeCodeLines(pdf, text, wMm, hMm, fontSizePt, separators) {
   return { lines, lineHeightMm, paddedHmm };
 }
 
-function computeCodeLinesForPreview(text, wMm, hMm, fontSizePt, separators) {
-  const { jsPDF } = window.jspdf;
-  const measurePdf = new jsPDF({ unit: "mm", format: [100, 100] });
-  return computeCodeLines(measurePdf, text, wMm, hMm, fontSizePt, separators);
-}
-
 function drawCodeTextFixedPt(pdf, text, x, y, w, h, fontSizePt, separators) {
   const { lines, lineHeightMm, paddedHmm } = computeCodeLines(pdf, text, w, h, fontSizePt, separators);
   const ptToMm = 25.4 / 72;
@@ -1069,9 +1063,13 @@ function splitByCustomSeparators(text, separators) {
   return text.split(regex).filter((part) => part.length > 0);
 }
 
+/** 条码编码内容固定为四段 + 短横线，与「标签连接符」设置无关（连接符仅用于可见文字）。 */
 function buildLocationCode(row, separators, mode = "barcode") {
+  if (mode === "barcode") {
+    return `${row.region}-${row.shelf}-${row.level}-${row.aisle}`;
+  }
   const mapSep = (s) => {
-    if (mode === "text" && /\s/.test(s || "")) return "\n";
+    if (/\s/.test(s || "")) return "\n";
     return s || "";
   };
   const rs = mapSep(separators.rs);
