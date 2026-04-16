@@ -4,6 +4,9 @@ const state = {
 };
 let pendingScrollTargetId = null;
 let miniMapViewFieldId = "__none__";
+/** 缩略图视图：虚拟字段，与业务字段右键交互一致 */
+const MINI_MAP_VIEW_ROWS = "__rows__";
+const MINI_MAP_VIEW_COLS = "__cols__";
 let selectedShelfIds = new Set();
 let miniMapPointerState = null;
 let miniMapInteractionsInitialized = false;
@@ -14,6 +17,46 @@ let excelExportOrder = [];
 let excelExportDraggedRow = null;
 const STORAGE_KEY = "warehouse_location_tool_v6";
 let persistTimer = null;
+
+/** 条码/标识在整张纸上的位置（mm，左上角为原点）；宽高由表单输入，此处仅存 x,y。改表单参数不重置位置，仅做边界夹紧。 */
+let pdfPrintLayoutState = null;
+let pdfEditSelected = null;
+/** @type {{ key: string; startClientX: number; startClientY: number; startPos: { x: number; y: number }; paperRect: DOMRect; paperWmm: number; paperHmm: number } | null} */
+let pdfEditorDrag = null;
+let pdfPreviewRenderRaf = null;
+/** 递增以取消过期的异步栅格化，避免旧结果盖住新布局 */
+let pdfPreviewRenderGen = 0;
+let pdfPreviewResizeObserver = null;
+let pdfPreviewResizeDebounceTimer = null;
+/** 拖动中节流栅格化，避免每帧重画 PDF 导致闪烁 */
+let pdfPreviewDragRasterTimer = null;
+
+function cancelPdfPreviewDragRasterize() {
+  if (pdfPreviewDragRasterTimer) {
+    clearTimeout(pdfPreviewDragRasterTimer);
+    pdfPreviewDragRasterTimer = null;
+  }
+}
+
+function schedulePdfPreviewDragRasterize(canvasEl, stackEl) {
+  if (pdfPreviewDragRasterTimer) return;
+  pdfPreviewDragRasterTimer = setTimeout(() => {
+    pdfPreviewDragRasterTimer = null;
+    schedulePdfPreviewCanvasRefresh(canvasEl, stackEl);
+  }, 140);
+}
+
+function disposePdfLivePreviewObservers() {
+  if (pdfPreviewResizeObserver) {
+    pdfPreviewResizeObserver.disconnect();
+    pdfPreviewResizeObserver = null;
+  }
+  if (pdfPreviewResizeDebounceTimer) {
+    clearTimeout(pdfPreviewResizeDebounceTimer);
+    pdfPreviewResizeDebounceTimer = null;
+  }
+  cancelPdfPreviewDragRasterize();
+}
 
 const EXCEL_CORE_HEADERS = ["区域编号", "货架编号", "层级编号", "货道编号"];
 
@@ -141,34 +184,64 @@ function persistToStorage() {
 
 function collectPdfFormValues() {
   return {
-    labelSizeMode: document.getElementById("labelSizeMode").value,
     paperSizeMode: document.getElementById("paperSizeMode").value,
-    labelWidth: document.getElementById("labelWidth").value,
-    labelHeight: document.getElementById("labelHeight").value,
     paperWidth: document.getElementById("paperWidth").value,
     paperHeight: document.getElementById("paperHeight").value,
-    layoutDirection: document.getElementById("layoutDirection").value,
-    verticalTopContent: document.getElementById("verticalTopContent").value,
-    horizontalLeftContent: document.getElementById("horizontalLeftContent").value,
+    barcodeBlockWidthMm: document.getElementById("barcodeBlockWidthMm").value,
+    barcodeBlockHeightMm: document.getElementById("barcodeBlockHeightMm").value,
+    textBlockWidthMm: document.getElementById("textBlockWidthMm").value,
+    textBlockHeightMm: document.getElementById("textBlockHeightMm").value,
     codeFontSize: document.getElementById("codeFontSize").value,
     sepRegionShelf: document.getElementById("sepRegionShelf").value,
     sepShelfLevel: document.getElementById("sepShelfLevel").value,
-    sepLevelAisle: document.getElementById("sepLevelAisle").value
+    sepLevelAisle: document.getElementById("sepLevelAisle").value,
+    printLayout: pdfPrintLayoutState
+      ? {
+          barcode: { x: pdfPrintLayoutState.barcode.x, y: pdfPrintLayoutState.barcode.y },
+          text: { x: pdfPrintLayoutState.text.x, y: pdfPrintLayoutState.text.y }
+        }
+      : null
   };
+}
+
+function migratePrintLayoutFromSaved(p) {
+  if (p.printLayout && p.printLayout.barcode && p.printLayout.text) {
+    return {
+      barcode: { x: Number(p.printLayout.barcode.x) || 0, y: Number(p.printLayout.barcode.y) || 0 },
+      text: { x: Number(p.printLayout.text.x) || 0, y: Number(p.printLayout.text.y) || 0 }
+    };
+  }
+  if (p.labelLayout && p.labelLayout.barcode && p.labelLayout.text) {
+    const pw = Math.max(10, Number(p.paperWidth) || 210);
+    const ph = Math.max(10, Number(p.paperHeight) || 297);
+    const lw = Math.max(10, Number(p.labelWidth) || 90);
+    const lh = Math.max(10, Number(p.labelHeight) || 60);
+    const ox = (pw - lw) / 2;
+    const oy = (ph - lh) / 2;
+    return {
+      barcode: {
+        x: ox + (Number(p.labelLayout.barcode.x) || 0),
+        y: oy + (Number(p.labelLayout.barcode.y) || 0)
+      },
+      text: {
+        x: ox + (Number(p.labelLayout.text.x) || 0),
+        y: oy + (Number(p.labelLayout.text.y) || 0)
+      }
+    };
+  }
+  return null;
 }
 
 function applyPdfFormValues(p) {
   if (!p) return;
   const entries = [
-    ["labelSizeMode", p.labelSizeMode],
     ["paperSizeMode", p.paperSizeMode],
-    ["labelWidth", p.labelWidth],
-    ["labelHeight", p.labelHeight],
     ["paperWidth", p.paperWidth],
     ["paperHeight", p.paperHeight],
-    ["layoutDirection", p.layoutDirection],
-    ["verticalTopContent", p.verticalTopContent],
-    ["horizontalLeftContent", p.horizontalLeftContent],
+    ["barcodeBlockWidthMm", p.barcodeBlockWidthMm],
+    ["barcodeBlockHeightMm", p.barcodeBlockHeightMm],
+    ["textBlockWidthMm", p.textBlockWidthMm],
+    ["textBlockHeightMm", p.textBlockHeightMm],
     ["codeFontSize", p.codeFontSize],
     ["sepRegionShelf", p.sepRegionShelf],
     ["sepShelfLevel", p.sepShelfLevel],
@@ -179,6 +252,26 @@ function applyPdfFormValues(p) {
     if (!el || v === undefined || v === null) return;
     el.value = String(v);
   });
+  if (p.labelLayout && p.labelLayout.barcode && !p.barcodeBlockWidthMm) {
+    const bwEl = document.getElementById("barcodeBlockWidthMm");
+    const bhEl = document.getElementById("barcodeBlockHeightMm");
+    const twEl = document.getElementById("textBlockWidthMm");
+    const thEl = document.getElementById("textBlockHeightMm");
+    if (bwEl && p.labelLayout.barcode.w != null) {
+      bwEl.value = String(Math.max(8, Math.round(Number(p.labelLayout.barcode.w))));
+    }
+    if (bhEl && p.labelLayout.barcode.h != null) {
+      bhEl.value = String(Math.max(6, Math.round(Number(p.labelLayout.barcode.h))));
+    }
+    if (twEl && p.labelLayout.text?.w != null) {
+      twEl.value = String(Math.max(8, Math.round(Number(p.labelLayout.text.w))));
+    }
+    if (thEl && p.labelLayout.text?.h != null) {
+      thEl.value = String(Math.max(6, Math.round(Number(p.labelLayout.text.h))));
+    }
+  }
+  const migrated = migratePrintLayoutFromSaved(p);
+  pdfPrintLayoutState = migrated;
 }
 
 function bindEvents() {
@@ -256,11 +349,6 @@ function bindEvents() {
     dialog.close();
   });
 
-  document.getElementById("labelSizeMode").addEventListener("change", (e) => {
-    applyPresetSize(e.target.value, "labelWidth", "labelHeight");
-    updatePdfPreview();
-    schedulePersist();
-  });
   document.getElementById("paperSizeMode").addEventListener("change", (e) => {
     applyPresetSize(e.target.value, "paperWidth", "paperHeight");
     updatePdfPreview();
@@ -268,29 +356,43 @@ function bindEvents() {
   });
 
   const pdfPreviewInputIds = [
-    "labelWidth",
-    "labelHeight",
     "paperWidth",
     "paperHeight",
-    "layoutDirection",
-    "verticalTopContent",
-    "horizontalLeftContent",
+    "barcodeBlockWidthMm",
+    "barcodeBlockHeightMm",
+    "textBlockWidthMm",
+    "textBlockHeightMm",
     "codeFontSize",
     "sepRegionShelf",
     "sepShelfLevel",
     "sepLevelAisle"
   ];
+  const onPdfFormInput = () => {
+    updatePdfPreview();
+    schedulePersist();
+  };
   pdfPreviewInputIds.forEach((id) => {
     const el = document.getElementById(id);
-    el.addEventListener("input", () => {
-      updatePdfPreview();
-      schedulePersist();
-    });
-    el.addEventListener("change", () => {
-      updatePdfPreview();
-      schedulePersist();
-    });
+    if (!el) return;
+    el.addEventListener("input", onPdfFormInput);
+    el.addEventListener("change", onPdfFormInput);
   });
+
+  const resetPdfBtn = document.getElementById("resetPdfLayoutBtn");
+  if (resetPdfBtn) {
+    resetPdfBtn.addEventListener("click", () => {
+      const paper = readPaperMmSize();
+      const bw = readPdfBarcodeSizeMm();
+      const td = readPdfTextBlockSizeMm();
+      const def = computeDefaultPrintPositionsMm(paper, bw.w, bw.h, td.w, td.h);
+      pdfPrintLayoutState = {
+        barcode: { ...def.barcode },
+        text: { ...def.text }
+      };
+      updatePdfPreview();
+      schedulePersist();
+    });
+  }
 
   document.getElementById("toggleMiniMapBtn").addEventListener("click", () => {
     const panel = document.getElementById("miniMapPanel");
@@ -910,8 +1012,8 @@ async function exportPdf() {
   }
 
   const { jsPDF } = window.jspdf;
-  const paper = readMmSize("paper");
-  const label = readMmSize("label");
+  const paper = readPaperMmSize();
+  ensurePdfPrintLayoutState(paper);
   const pdfSettings = readPdfSettingsForExport();
 
   const pdf = new jsPDF({
@@ -922,66 +1024,224 @@ async function exportPdf() {
 
   for (let i = 0; i < rows.length; i += 1) {
     if (i > 0) pdf.addPage([paper.w, paper.h], paper.w >= paper.h ? "landscape" : "portrait");
-    const row = rows[i];
-    const codeForBarcode = buildLocationCode(row, pdfSettings.separators, "barcode");
-    const codeForText = buildLocationCode(row, pdfSettings.separators, "text");
-    const barcodeDataUrl = makeBarcode(codeForBarcode);
-    const offsetX = (paper.w - label.w) / 2;
-    const offsetY = (paper.h - label.h) / 2;
-    drawSingleLabelOnPdf(pdf, offsetX, offsetY, label.w, label.h, codeForText, barcodeDataUrl, pdfSettings);
+    appendLocationLabelPageToDoc(pdf, rows[i], pdfSettings);
   }
 
   pdf.save(`货位码标签_${nowDateText()}.pdf`);
 }
 
-function readPdfSettingsForExport() {
-  const raw = document.getElementById("codeFontSize").value;
-  const fontSize = Number.parseFloat(raw);
-  const fontSizePt = Number.isFinite(fontSize) ? fontSize : 24;
+function readPaperMmSize() {
+  const mode = document.getElementById("paperSizeMode").value;
+  let w = Number(document.getElementById("paperWidth").value);
+  let h = Number(document.getElementById("paperHeight").value);
+  if (mode === "a4") ({ w, h } = { w: 210, h: 297 });
+  if (mode === "a3") ({ w, h } = { w: 297, h: 420 });
+  return { w: Math.max(10, w), h: Math.max(10, h) };
+}
+
+function readPdfBarcodeSizeMm() {
+  const w = Number.parseFloat(document.getElementById("barcodeBlockWidthMm").value);
+  const h = Number.parseFloat(document.getElementById("barcodeBlockHeightMm").value);
   return {
-    fontSizePt,
-    layoutDirection: document.getElementById("layoutDirection").value,
-    verticalTopContent: document.getElementById("verticalTopContent").value,
-    horizontalLeftContent: document.getElementById("horizontalLeftContent").value,
-    separators: {
-      rs: document.getElementById("sepRegionShelf").value || "",
-      sl: document.getElementById("sepShelfLevel").value || "",
-      la: document.getElementById("sepLevelAisle").value || ""
+    w: Math.min(500, Math.max(8, Number.isFinite(w) ? w : 72)),
+    h: Math.min(500, Math.max(6, Number.isFinite(h) ? h : 28))
+  };
+}
+
+function readPdfTextBlockSizeMm() {
+  const w = Number.parseFloat(document.getElementById("textBlockWidthMm").value);
+  const h = Number.parseFloat(document.getElementById("textBlockHeightMm").value);
+  return {
+    w: Math.min(500, Math.max(8, Number.isFinite(w) ? w : 80)),
+    h: Math.min(500, Math.max(6, Number.isFinite(h) ? h : 22))
+  };
+}
+
+function clampPosOnPaper(pos, w, h, pw, ph) {
+  return {
+    x: Math.max(0, Math.min(pos.x, pw - w)),
+    y: Math.max(0, Math.min(pos.y, ph - h))
+  };
+}
+
+function computeDefaultPrintPositionsMm(paper, bw, bh, tw, th) {
+  const { w: pw, h: ph } = paper;
+  const gap = 6;
+  const bx = (pw - bw) / 2;
+  const by = Math.max(8, Math.min(28, (ph - bh - gap - th) * 0.28));
+  const tx = (pw - tw) / 2;
+  const ty = Math.min(ph - th - 10, by + bh + gap);
+  return {
+    barcode: clampPosOnPaper({ x: bx, y: by }, bw, bh, pw, ph),
+    text: clampPosOnPaper({ x: tx, y: ty }, tw, th, pw, ph)
+  };
+}
+
+function ensurePdfPrintLayoutState(paper) {
+  const bw = readPdfBarcodeSizeMm();
+  const td = readPdfTextBlockSizeMm();
+  const def = computeDefaultPrintPositionsMm(paper, bw.w, bw.h, td.w, td.h);
+  if (!pdfPrintLayoutState) {
+    pdfPrintLayoutState = {
+      barcode: { ...def.barcode },
+      text: { ...def.text }
+    };
+    return;
+  }
+  pdfPrintLayoutState.barcode = clampPosOnPaper(pdfPrintLayoutState.barcode, bw.w, bw.h, paper.w, paper.h);
+  pdfPrintLayoutState.text = clampPosOnPaper(pdfPrintLayoutState.text, td.w, td.h, paper.w, paper.h);
+}
+
+function buildPrintElementRectsMm() {
+  const paper = readPaperMmSize();
+  ensurePdfPrintLayoutState(paper);
+  const bw = readPdfBarcodeSizeMm();
+  const td = readPdfTextBlockSizeMm();
+  return {
+    barcode: {
+      x: pdfPrintLayoutState.barcode.x,
+      y: pdfPrintLayoutState.barcode.y,
+      w: bw.w,
+      h: bw.h
+    },
+    text: {
+      x: pdfPrintLayoutState.text.x,
+      y: pdfPrintLayoutState.text.y,
+      w: td.w,
+      h: td.h
     }
   };
 }
 
-function getLabelContentFractions(fontSizePt, layoutDirection) {
-  const textWeight = Math.min(2, Math.max(0.6, fontSizePt / 20));
-  if (layoutDirection === "vertical") {
-    const textRatio = Math.min(0.55, Math.max(0.24, 0.24 + textWeight * 0.08));
-    return { textRatio, barcodeRatio: 1 - textRatio };
-  }
-  const textRatio = Math.min(0.58, Math.max(0.24, 0.24 + textWeight * 0.09));
-  return { textRatio, barcodeRatio: 1 - textRatio };
+function readPdfSettingsForExport() {
+  const raw = document.getElementById("codeFontSize").value;
+  const fontSize = Number.parseFloat(raw);
+  const fontSizePt = Number.isFinite(fontSize) ? fontSize : 14;
+  const paper = readPaperMmSize();
+  ensurePdfPrintLayoutState(paper);
+  return {
+    fontSizePt,
+    separators: {
+      rs: document.getElementById("sepRegionShelf").value || "",
+      sl: document.getElementById("sepShelfLevel").value || "",
+      la: document.getElementById("sepLevelAisle").value || ""
+    },
+    elementRects: buildPrintElementRectsMm(),
+    paperW: paper.w,
+    paperH: paper.h
+  };
 }
 
-function drawSingleLabelOnPdf(pdf, offsetX, offsetY, labelW, labelH, code, barcodeDataUrl, settings) {
-  const { fontSizePt, layoutDirection, verticalTopContent, horizontalLeftContent, separators } = settings;
-  const { textRatio, barcodeRatio } = getLabelContentFractions(fontSizePt, layoutDirection);
-  pdf.setDrawColor(180);
-  pdf.rect(offsetX, offsetY, labelW, labelH);
+function drawPrintPageOnPdf(pdf, paperW, paperH, code, barcodeAsset, settings) {
+  const { fontSizePt, separators, elementRects } = settings;
+  pdf.setDrawColor(210);
+  pdf.setLineWidth(0.15);
+  pdf.rect(0.5, 0.5, paperW - 1, paperH - 1);
+  const b = elementRects.barcode;
+  const t = elementRects.text;
+  drawBarcode(pdf, barcodeAsset, b.x, b.y, b.w, b.h);
+  drawCodeTextFixedPt(pdf, code, t.x, t.y, t.w, t.h, fontSizePt, separators);
+}
 
-  if (layoutDirection === "vertical") {
-    if (verticalTopContent === "barcode") {
-      drawBarcode(pdf, barcodeDataUrl, offsetX, offsetY, labelW, labelH * barcodeRatio);
-      drawCodeTextFixedPt(pdf, code, offsetX, offsetY + labelH * barcodeRatio, labelW, labelH * textRatio, fontSizePt, separators);
-    } else {
-      drawCodeTextFixedPt(pdf, code, offsetX, offsetY, labelW, labelH * textRatio, fontSizePt, separators);
-      drawBarcode(pdf, barcodeDataUrl, offsetX, offsetY + labelH * textRatio, labelW, labelH * barcodeRatio);
-    }
-  } else if (horizontalLeftContent === "barcode") {
-    drawBarcode(pdf, barcodeDataUrl, offsetX, offsetY, labelW * barcodeRatio, labelH);
-    drawCodeTextFixedPt(pdf, code, offsetX + labelW * barcodeRatio, offsetY, labelW * textRatio, labelH, fontSizePt, separators);
-  } else {
-    drawCodeTextFixedPt(pdf, code, offsetX, offsetY, labelW * textRatio, labelH, fontSizePt, separators);
-    drawBarcode(pdf, barcodeDataUrl, offsetX + labelW * textRatio, offsetY, labelW * barcodeRatio, labelH);
+/** 单页标签绘制：导出与预览共用，保证所见即所得。 */
+function appendLocationLabelPageToDoc(pdf, row, settings) {
+  const codeForBarcode = buildLocationCode(row, settings.separators, "barcode");
+  const codeForText = buildLocationCode(row, settings.separators, "text");
+  const barcodeAsset = makeBarcode(
+    codeForBarcode,
+    settings.elementRects.barcode.w,
+    settings.elementRects.barcode.h
+  );
+  drawPrintPageOnPdf(pdf, settings.paperW, settings.paperH, codeForText, barcodeAsset, settings);
+}
+
+function buildSinglePagePreviewJsPdf() {
+  const paper = readPaperMmSize();
+  ensurePdfPrintLayoutState(paper);
+  const settings = readPdfSettingsForExport();
+  const sample = getPreviewSampleRow();
+  if (!window.jspdf) return null;
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({
+    orientation: paper.w >= paper.h ? "landscape" : "portrait",
+    unit: "mm",
+    format: [paper.w, paper.h]
+  });
+  appendLocationLabelPageToDoc(pdf, sample, settings);
+  return pdf;
+}
+
+function createPreviewPdfArrayBuffer() {
+  const pdf = buildSinglePagePreviewJsPdf();
+  return pdf ? pdf.output("arraybuffer") : null;
+}
+
+function ensurePdfjsWorker() {
+  if (typeof pdfjsLib === "undefined") return false;
+  if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
   }
+  return true;
+}
+
+/**
+ * 用 PDF.js 将导出同源单页栅格化到 canvas，铺满栈区域（避免 iframe 内置查看器留白/缩放导致与拖动层错位）。
+ */
+async function rasterizePreviewPdfToCanvas(canvasEl, stackEl) {
+  const startGen = pdfPreviewRenderGen;
+  const ab = createPreviewPdfArrayBuffer();
+  if (!ab || !canvasEl || !stackEl) return;
+  if (!ensurePdfjsWorker()) {
+    console.warn("pdf.js 未加载，标签预览无法栅格化");
+    return;
+  }
+  const rect = stackEl.getBoundingClientRect();
+  const w = Math.max(8, rect.width);
+  const h = Math.max(8, rect.height);
+  let pdfDoc;
+  try {
+    pdfDoc = await pdfjsLib.getDocument({ data: ab }).promise;
+  } catch (err) {
+    console.error(err);
+    return;
+  }
+  if (startGen !== pdfPreviewRenderGen) return;
+  let page;
+  try {
+    page = await pdfDoc.getPage(1);
+  } catch (err) {
+    console.error(err);
+    return;
+  }
+  if (startGen !== pdfPreviewRenderGen) return;
+  const vp1 = page.getViewport({ scale: 1 });
+  const sCss = Math.min(w / vp1.width, h / vp1.height);
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const viewport = page.getViewport({ scale: sCss * dpr });
+  canvasEl.width = Math.max(1, Math.floor(viewport.width));
+  canvasEl.height = Math.max(1, Math.floor(viewport.height));
+  canvasEl.style.width = "100%";
+  canvasEl.style.height = "100%";
+  const ctx = canvasEl.getContext("2d");
+  if (!ctx) return;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+  try {
+    await page.render({ canvasContext: ctx, viewport }).promise;
+  } catch (err) {
+    console.error(err);
+  }
+  if (startGen !== pdfPreviewRenderGen) return;
+}
+
+function schedulePdfPreviewCanvasRefresh(canvasEl, stackEl) {
+  if (!canvasEl || !stackEl) return;
+  if (pdfPreviewRenderRaf) cancelAnimationFrame(pdfPreviewRenderRaf);
+  pdfPreviewRenderRaf = requestAnimationFrame(() => {
+    pdfPreviewRenderRaf = null;
+    rasterizePreviewPdfToCanvas(canvasEl, stackEl).catch((err) => console.error(err));
+  });
 }
 
 function buildLocationRows() {
@@ -1006,8 +1266,13 @@ function buildLocationRows() {
   return out;
 }
 
-function drawBarcode(pdf, dataUrl, x, y, w, h) {
-  pdf.addImage(dataUrl, "PNG", x + 2, y + 2, Math.max(w - 4, 10), Math.max(h - 8, 10));
+/**
+ * 条码位图已由 makeBarcode 裁边并按区块 mm 宽高比铺满，此处直接贴入 mm 矩形，无额外留白。
+ * @param {{ dataUrl: string; widthPx: number; heightPx: number }} asset
+ */
+function drawBarcode(pdf, asset, x, y, w, h) {
+  const dataUrl = asset?.dataUrl || asset;
+  pdf.addImage(dataUrl, "PNG", x, y, w, h);
 }
 
 function computeCodeLines(pdf, text, wMm, hMm, fontSizePt, separators) {
@@ -1099,43 +1364,317 @@ function updatePdfPreview() {
   const host = document.getElementById("pdfPreviewHost");
   if (!host) return;
 
-  const paper = readMmSize("paper");
-  const label = readMmSize("label");
-  const settings = readPdfSettingsForExport();
-  const sample = getPreviewSampleRow();
-  const codeForBarcode = buildLocationCode(sample, settings.separators, "barcode");
-  const codeForText = buildLocationCode(sample, settings.separators, "text");
+  const paper = readPaperMmSize();
+  ensurePdfPrintLayoutState(paper);
 
-  const { jsPDF } = window.jspdf;
-  const pdf = new jsPDF({
-    orientation: paper.w >= paper.h ? "landscape" : "portrait",
-    unit: "mm",
-    format: [paper.w, paper.h]
-  });
-  const barcodeUrl = makeBarcode(codeForBarcode);
-  const offsetX = (paper.w - label.w) / 2;
-  const offsetY = (paper.h - label.h) / 2;
-  drawSingleLabelOnPdf(pdf, offsetX, offsetY, label.w, label.h, codeForText, barcodeUrl, settings);
-
+  pdfEditorDrag = null;
+  cancelPdfPreviewDragRasterize();
+  pdfPreviewRenderGen += 1;
+  disposePdfLivePreviewObservers();
+  if (pdfPreviewRenderRaf) {
+    cancelAnimationFrame(pdfPreviewRenderRaf);
+    pdfPreviewRenderRaf = null;
+  }
   host.innerHTML = "";
-  const frame = document.createElement("iframe");
-  frame.className = "pdf-preview-frame";
-  frame.title = "PDF打印预览";
-  frame.src = pdf.output("datauristring");
-  host.appendChild(frame);
+  renderPdfLivePreview(host, paper);
 }
 
-function makeBarcode(code) {
+function stylePdfEditElOnPaper(el, rectMm, paper) {
+  el.style.left = `${(rectMm.x / paper.w) * 100}%`;
+  el.style.top = `${(rectMm.y / paper.h) * 100}%`;
+  el.style.width = `${(rectMm.w / paper.w) * 100}%`;
+  el.style.height = `${(rectMm.h / paper.h) * 100}%`;
+}
+
+/**
+ * 预览区：内嵌与导出同一套 jsPDF 单页，叠透明拖动层，保证换行、字号、条码与 PDF 完全一致。
+ */
+function renderPdfLivePreview(host, paper) {
+  const wrap = document.createElement("div");
+  wrap.className = "pdf-edit-wrap";
+
+  const stage = document.createElement("div");
+  stage.className = "pdf-edit-stage";
+
+  const stackEl = document.createElement("div");
+  stackEl.className = "pdf-preview-stack";
+  stackEl.style.aspectRatio = `${paper.w} / ${paper.h}`;
+  stackEl.style.width = "100%";
+
   const canvas = document.createElement("canvas");
-  JsBarcode(canvas, code, {
-    format: "CODE128",
-    lineColor: "#000",
-    width: 2,
-    height: 80,
-    displayValue: false,
-    margin: 0
+  canvas.className = "pdf-preview-canvas";
+  canvas.setAttribute("aria-hidden", "true");
+
+  const layer = document.createElement("div");
+  layer.className = "pdf-preview-drag-layer";
+
+  const barEl = document.createElement("div");
+  barEl.className = "pdf-edit-el pdf-edit-barcode pdf-edit-overlay-hit";
+  barEl.dataset.role = "barcode";
+  const barHandle = document.createElement("div");
+  barHandle.className = "pdf-edit-drag-handle";
+  barHandle.title = "拖动手柄";
+  barEl.appendChild(barHandle);
+
+  const textEl = document.createElement("div");
+  textEl.className = "pdf-edit-el pdf-edit-text pdf-edit-overlay-hit";
+  textEl.dataset.role = "text";
+  const textHandle = document.createElement("div");
+  textHandle.className = "pdf-edit-drag-handle";
+  textHandle.title = "拖动手柄";
+  textEl.appendChild(textHandle);
+
+  const applyRectsToDom = (opts = {}) => {
+    const refreshPreview = opts.refreshPreview !== false;
+    const st = pdfPrintLayoutState;
+    if (!st) return;
+    const bw = readPdfBarcodeSizeMm();
+    const td = readPdfTextBlockSizeMm();
+    stylePdfEditElOnPaper(barEl, { ...st.barcode, w: bw.w, h: bw.h }, paper);
+    stylePdfEditElOnPaper(textEl, { ...st.text, w: td.w, h: td.h }, paper);
+    barEl.classList.toggle("is-selected", pdfEditSelected === "barcode");
+    textEl.classList.toggle("is-selected", pdfEditSelected === "text");
+    if (refreshPreview) schedulePdfPreviewCanvasRefresh(canvas, stackEl);
+  };
+
+  layer.appendChild(barEl);
+  layer.appendChild(textEl);
+  stackEl.appendChild(canvas);
+  stackEl.appendChild(layer);
+  stage.appendChild(stackEl);
+  wrap.appendChild(stage);
+  host.appendChild(wrap);
+
+  stage.addEventListener("pointerdown", (e) => {
+    if (!e.target.closest(".pdf-edit-el")) {
+      pdfEditSelected = null;
+      applyRectsToDom({ refreshPreview: false });
+    }
   });
-  return canvas.toDataURL("image/png");
+
+  const beginDrag = (key, e) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    pdfEditSelected = key;
+    applyRectsToDom({ refreshPreview: false });
+    const r = stackEl.getBoundingClientRect();
+    pdfEditorDrag = {
+      key,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      startPos: { x: pdfPrintLayoutState[key].x, y: pdfPrintLayoutState[key].y },
+      paperRect: r,
+      paperWmm: paper.w,
+      paperHmm: paper.h
+    };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  barEl.addEventListener("pointerdown", (e) => beginDrag("barcode", e));
+  textEl.addEventListener("pointerdown", (e) => beginDrag("text", e));
+
+  const onMove = (e) => {
+    if (!pdfEditorDrag) return;
+    const { key, startClientX, startClientY, startPos, paperRect, paperWmm: pw, paperHmm: ph } = pdfEditorDrag;
+    const dims = key === "barcode" ? readPdfBarcodeSizeMm() : readPdfTextBlockSizeMm();
+    const prw = paperRect.width || 1;
+    const prh = paperRect.height || 1;
+    const dxMm = ((e.clientX - startClientX) / prw) * pw;
+    const dyMm = ((e.clientY - startClientY) / prh) * ph;
+    const next = clampPosOnPaper({ x: startPos.x + dxMm, y: startPos.y + dyMm }, dims.w, dims.h, pw, ph);
+    pdfPrintLayoutState[key] = next;
+    applyRectsToDom({ refreshPreview: false });
+    schedulePdfPreviewDragRasterize(canvas, stackEl);
+  };
+
+  const endDrag = (e) => {
+    if (pdfEditorDrag) {
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ignore */
+      }
+      pdfEditorDrag = null;
+      schedulePersist();
+      cancelPdfPreviewDragRasterize();
+      schedulePdfPreviewCanvasRefresh(canvas, stackEl);
+    }
+  };
+
+  barEl.addEventListener("pointermove", onMove);
+  barEl.addEventListener("pointerup", endDrag);
+  barEl.addEventListener("pointercancel", endDrag);
+  textEl.addEventListener("pointermove", onMove);
+  textEl.addEventListener("pointerup", endDrag);
+  textEl.addEventListener("pointercancel", endDrag);
+
+  applyRectsToDom({ refreshPreview: true });
+
+  disposePdfLivePreviewObservers();
+  const ro = new ResizeObserver(() => {
+    if (pdfPreviewResizeDebounceTimer) clearTimeout(pdfPreviewResizeDebounceTimer);
+    pdfPreviewResizeDebounceTimer = setTimeout(() => {
+      pdfPreviewResizeDebounceTimer = null;
+      schedulePdfPreviewCanvasRefresh(canvas, stackEl);
+    }, 80);
+  });
+  pdfPreviewResizeObserver = ro;
+  ro.observe(stackEl);
+}
+
+const makeBarcodeAssetCache = new Map();
+const MAKE_BARCODE_CACHE_MAX = 48;
+
+/** 去掉 JsBarcode 生成的透明外边，减小 PDF 内「假留白」。 */
+function trimCanvasTransparent(source) {
+  const w0 = source.width;
+  const h0 = source.height;
+  if (!w0 || !h0) return source;
+  const ctx = source.getContext("2d");
+  if (!ctx) return source;
+  const { data } = ctx.getImageData(0, 0, w0, h0);
+  let minX = w0;
+  let minY = h0;
+  let maxX = -1;
+  let maxY = -1;
+  const stride = 4;
+  for (let y = 0; y < h0; y += 1) {
+    const row = y * w0 * stride;
+    for (let x = 0; x < w0; x += 1) {
+      const a = data[row + x * stride + 3];
+      if (a > 12) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < minX) return source;
+  const cw = maxX - minX + 1;
+  const ch = maxY - minY + 1;
+  const out = document.createElement("canvas");
+  out.width = cw;
+  out.height = ch;
+  out.getContext("2d").drawImage(source, minX, minY, cw, ch, 0, 0, cw, ch);
+  return out;
+}
+
+/**
+ * 将裁好的条码按区块 mm 的宽高比做「铺满」合成（必要时左右或上下裁掉多余条宽），
+ * 使 drawBarcode 用 (w,h) mm 贴图时四周无应用层留白。
+ */
+function composeBarcodeToBoxAspect(source, boxWmm, boxHmm) {
+  const trimmed = trimCanvasTransparent(source);
+  const tw = trimmed.width;
+  const th = trimmed.height;
+  if (!tw || !th) return trimmed;
+  const targetAr = Math.max(0.02, boxWmm / boxHmm);
+  const srcAr = tw / th;
+  const longPx = 1600;
+  let outW;
+  let outH;
+  if (targetAr >= 1) {
+    outW = longPx;
+    outH = Math.max(1, Math.round(longPx / targetAr));
+  } else {
+    outH = longPx;
+    outW = Math.max(1, Math.round(longPx * targetAr));
+  }
+  const out = document.createElement("canvas");
+  out.width = outW;
+  out.height = outH;
+  const octx = out.getContext("2d");
+  if (!octx) return trimmed;
+  octx.fillStyle = "#ffffff";
+  octx.fillRect(0, 0, outW, outH);
+  let sx;
+  let sy;
+  let sw;
+  let sh;
+  if (srcAr > targetAr) {
+    sh = th;
+    sw = th * targetAr;
+    sx = (tw - sw) / 2;
+    sy = 0;
+  } else {
+    sw = tw;
+    sh = tw / targetAr;
+    sx = 0;
+    sy = (th - sh) / 2;
+  }
+  octx.drawImage(trimmed, sx, sy, sw, sh, 0, 0, outW, outH);
+  return out;
+}
+
+/**
+ * 生成与条码区块 mm 同宽高比的 PNG，供 PDF 整格贴入；宽窄条比例在生成阶段保持，仅裁掉库自带透明边。
+ */
+function makeBarcode(code, boxWmm, boxHmm) {
+  const W = Math.max(8, Number(boxWmm) || 72);
+  const H = Math.max(6, Number(boxHmm) || 28);
+  const cacheKey = `${code}\t${Math.round(W * 4) / 4}\t${Math.round(H * 4) / 4}`;
+  if (makeBarcodeAssetCache.has(cacheKey)) {
+    return makeBarcodeAssetCache.get(cacheKey);
+  }
+
+  const targetAr = W / H;
+  let bestCanvas = null;
+  let bestScore = -1;
+
+  for (let lineW = 1; lineW <= 8; lineW += 1) {
+    for (let hPx = 24; hPx <= 240; hPx += 4) {
+      const canvas = document.createElement("canvas");
+      try {
+        JsBarcode(canvas, code, {
+          format: "CODE128",
+          lineColor: "#000",
+          width: lineW,
+          height: hPx,
+          displayValue: false,
+          margin: 0
+        });
+      } catch {
+        continue;
+      }
+      const cw = canvas.width;
+      const ch = canvas.height;
+      if (!cw || !ch) continue;
+      const ar = cw / ch;
+      const fit = Math.min(targetAr / ar, ar / targetAr);
+      const score = fit + cw * ch * 1e-9;
+      if (score > bestScore) {
+        bestScore = score;
+        bestCanvas = canvas;
+      }
+    }
+  }
+
+  if (!bestCanvas) {
+    const c = document.createElement("canvas");
+    JsBarcode(c, code, {
+      format: "CODE128",
+      lineColor: "#000",
+      width: 2,
+      height: 80,
+      displayValue: false,
+      margin: 0
+    });
+    bestCanvas = c;
+  }
+
+  const composed = composeBarcodeToBoxAspect(bestCanvas, W, H);
+  const out = {
+    dataUrl: composed.toDataURL("image/png"),
+    widthPx: composed.width,
+    heightPx: composed.height
+  };
+  if (makeBarcodeAssetCache.size >= MAKE_BARCODE_CACHE_MAX) {
+    const firstKey = makeBarcodeAssetCache.keys().next().value;
+    makeBarcodeAssetCache.delete(firstKey);
+  }
+  makeBarcodeAssetCache.set(cacheKey, out);
+  return out;
 }
 
 function nextRegionName() {
@@ -1172,15 +1711,6 @@ function applyPresetSize(mode, widthId, heightId) {
   const preset = mode === "a3" ? { w: 297, h: 420 } : { w: 210, h: 297 };
   document.getElementById(widthId).value = preset.w;
   document.getElementById(heightId).value = preset.h;
-}
-
-function readMmSize(prefix) {
-  const mode = document.getElementById(`${prefix}SizeMode`).value;
-  let w = Number(document.getElementById(`${prefix}Width`).value);
-  let h = Number(document.getElementById(`${prefix}Height`).value);
-  if (mode === "a4") ({ w, h } = { w: 210, h: 297 });
-  if (mode === "a3") ({ w, h } = { w: 297, h: 420 });
-  return { w: Math.max(10, w), h: Math.max(10, h) };
 }
 
 function sanitizeTwoDigitNum(value, fallback) {
@@ -1227,6 +1757,12 @@ function nowDateText() {
   return `${y}${m}${day}_${hh}${mm}`;
 }
 
+function getShelfDimColor(valueStr) {
+  const n = Number(String(valueStr).replace(/\D/g, "")) || 0;
+  const palette = ["#93c5fd", "#86efac", "#fde68a", "#fca5a5", "#c4b5fd", "#67e8f9", "#f9a8d4", "#d9f99d"];
+  return palette[n % palette.length];
+}
+
 function renderMiniMap() {
   const container = document.getElementById("miniMapContent");
   container.innerHTML = "";
@@ -1248,18 +1784,33 @@ function renderMiniMap() {
       shelfNode.className = "mini-shelf";
       if (selectedShelfIds.has(shelf.id)) shelfNode.classList.add("mini-shelf-selected");
       shelfNode.dataset.shelfId = shelf.id;
-      const labelText = viewField ? (shelf.businessValues[viewField.id] || "-") : "";
-      const color = getShelfColor(viewField, labelText);
-      shelfNode.style.background = color;
       const rowN = Number(sanitizeTwoDigitNum(shelf.rows, 7));
       const colN = Number(sanitizeTwoDigitNum(shelf.cols, 9));
       const slotCount = rowN * colN;
+      let bottomText = "";
+      let bg = "#4b5563";
+      if (miniMapViewFieldId === MINI_MAP_VIEW_ROWS) {
+        bottomText = `${shelf.rows} 行`;
+        bg = getShelfDimColor(shelf.rows);
+      } else if (miniMapViewFieldId === MINI_MAP_VIEW_COLS) {
+        bottomText = `${shelf.cols} 列`;
+        bg = getShelfDimColor(shelf.cols);
+      } else if (miniMapViewFieldId === "__none__") {
+        bottomText = "未选视图";
+        bg = "#374151";
+      } else if (viewField) {
+        bottomText = shelf.businessValues[viewField.id] || "-";
+        bg = getShelfColor(viewField, bottomText);
+      } else {
+        bottomText = "-";
+      }
+      shelfNode.style.background = bg;
       shelfNode.innerHTML = `
         <div class="mini-shelf-top">${escapeHtml(shelf.code)}</div>
         <div class="mini-shelf-count">${slotCount}货位</div>
-        <div class="mini-shelf-bottom">${escapeHtml(labelText || "未选择视图字段")}</div>
+        <div class="mini-shelf-bottom">${escapeHtml(bottomText)}</div>
       `;
-      shelfNode.title = `区域${region.name} 货架${shelf.code}（左键选中，拖拽框选，Ctrl/Cmd+点击加选，右键批量改「视图字段」）`;
+      shelfNode.title = `区域${region.name} 货架${shelf.code}（左键选中，拖拽框选，Ctrl/Cmd+点击加选；有选中时右键按当前视图字段批量修改）`;
       shelfGrid.appendChild(shelfNode);
     });
     regionWrap.appendChild(shelfGrid);
@@ -1277,6 +1828,16 @@ function renderMiniMapFieldOptions() {
   noneOption.textContent = "不启用";
   select.appendChild(noneOption);
 
+  const rowsOp = document.createElement("option");
+  rowsOp.value = MINI_MAP_VIEW_ROWS;
+  rowsOp.textContent = "行数（层级）";
+  select.appendChild(rowsOp);
+
+  const colsOp = document.createElement("option");
+  colsOp.value = MINI_MAP_VIEW_COLS;
+  colsOp.textContent = "列数（货道）";
+  select.appendChild(colsOp);
+
   state.fields.forEach((field) => {
     const op = document.createElement("option");
     op.value = field.id;
@@ -1284,7 +1845,12 @@ function renderMiniMapFieldOptions() {
     select.appendChild(op);
   });
 
-  const availableValues = new Set(["__none__", ...state.fields.map((f) => f.id)]);
+  const availableValues = new Set([
+    "__none__",
+    MINI_MAP_VIEW_ROWS,
+    MINI_MAP_VIEW_COLS,
+    ...state.fields.map((f) => f.id)
+  ]);
   miniMapViewFieldId = availableValues.has(oldValue) ? oldValue : "__none__";
   select.value = miniMapViewFieldId;
 }
@@ -1333,6 +1899,52 @@ function updateSelectionUi() {
   syncWorkspaceShelfHighlight();
 }
 
+function applyRowsToSelectedShelves(rowsStr) {
+  const rows = sanitizeTwoDigitNum(rowsStr, 7);
+  state.regions.forEach((region) => {
+    region.shelves.forEach((shelf) => {
+      if (selectedShelfIds.has(shelf.id)) shelf.rows = rows;
+    });
+  });
+  renderAll();
+}
+
+function applyColsToSelectedShelves(colsStr) {
+  const cols = sanitizeTwoDigitNum(colsStr, 9);
+  state.regions.forEach((region) => {
+    region.shelves.forEach((shelf) => {
+      if (selectedShelfIds.has(shelf.id)) shelf.cols = cols;
+    });
+  });
+  renderAll();
+}
+
+function appendMiniMapContextNumericBatch(menu, mode) {
+  const wrap = document.createElement("div");
+  wrap.className = "context-menu-numeric";
+  const lab = document.createElement("label");
+  lab.className = "context-menu-numeric-label";
+  lab.textContent = mode === "row" ? "自定义行数" : "自定义列数";
+  const inp = document.createElement("input");
+  inp.type = "number";
+  inp.min = 1;
+  inp.max = 99;
+  inp.className = "context-menu-numeric-input";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "context-menu-numeric-btn";
+  btn.textContent = "应用";
+  btn.addEventListener("click", () => {
+    if (mode === "row") applyRowsToSelectedShelves(inp.value);
+    else applyColsToSelectedShelves(inp.value);
+    hideMiniMapContextMenu();
+  });
+  lab.appendChild(inp);
+  wrap.appendChild(lab);
+  wrap.appendChild(btn);
+  menu.appendChild(wrap);
+}
+
 function syncWorkspaceShelfHighlight() {
   document.querySelectorAll(".shelf-card").forEach((card) => {
     const id = card.id.startsWith("shelf-") ? card.id.slice("shelf-".length) : "";
@@ -1349,16 +1961,45 @@ function hideMiniMapContextMenu() {
 function showMiniMapContextMenu(clientX, clientY) {
   const menu = document.getElementById("miniMapContextMenu");
   const field = state.fields.find((f) => f.id === miniMapViewFieldId);
+  const n = selectedShelfIds.size;
   menu.innerHTML = "";
-  if (!field) {
-    const empty = document.createElement("div");
-    empty.className = "context-menu-empty";
-    empty.textContent = "未找到视图字段";
-    menu.appendChild(empty);
-  } else {
+
+  if (miniMapViewFieldId === MINI_MAP_VIEW_ROWS) {
     const title = document.createElement("div");
     title.className = "context-menu-title";
-    title.textContent = `批量设置「${field.name}」· 已选 ${selectedShelfIds.size} 个货架`;
+    title.textContent = `批量设置行数 · 已选 ${n} 个货架`;
+    menu.appendChild(title);
+    [5, 6, 7, 8, 9, 10, 12, 15].forEach((v) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = `设为 ${v} 行`;
+      btn.addEventListener("click", () => {
+        applyRowsToSelectedShelves(String(v));
+        hideMiniMapContextMenu();
+      });
+      menu.appendChild(btn);
+    });
+    appendMiniMapContextNumericBatch(menu, "row");
+  } else if (miniMapViewFieldId === MINI_MAP_VIEW_COLS) {
+    const title = document.createElement("div");
+    title.className = "context-menu-title";
+    title.textContent = `批量设置列数 · 已选 ${n} 个货架`;
+    menu.appendChild(title);
+    [6, 7, 8, 9, 10, 12, 15, 20].forEach((v) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = `设为 ${v} 列`;
+      btn.addEventListener("click", () => {
+        applyColsToSelectedShelves(String(v));
+        hideMiniMapContextMenu();
+      });
+      menu.appendChild(btn);
+    });
+    appendMiniMapContextNumericBatch(menu, "col");
+  } else if (field && miniMapViewFieldId !== "__none__") {
+    const title = document.createElement("div");
+    title.className = "context-menu-title";
+    title.textContent = `批量设置「${field.name}」· 已选 ${n} 个货架`;
     menu.appendChild(title);
     field.options.forEach((opt) => {
       const btn = document.createElement("button");
@@ -1370,7 +2011,13 @@ function showMiniMapContextMenu(clientX, clientY) {
       });
       menu.appendChild(btn);
     });
+  } else {
+    const hint = document.createElement("div");
+    hint.className = "context-menu-hint";
+    hint.textContent = "请先在「视图字段」中选择：行数、列数或某个业务字段，再右键批量修改。";
+    menu.appendChild(hint);
   }
+
   menu.hidden = false;
   menu.style.left = `${clientX}px`;
   menu.style.top = `${clientY}px`;
@@ -1503,10 +2150,6 @@ function initMiniMapShelfInteractions() {
   content.addEventListener("contextmenu", (e) => {
     if (selectedShelfIds.size === 0) return;
     e.preventDefault();
-    if (miniMapViewFieldId === "__none__") {
-      alert("请先在「视图字段」中选择一个业务字段，才能批量修改该字段。");
-      return;
-    }
     showMiniMapContextMenu(e.clientX, e.clientY);
   });
 

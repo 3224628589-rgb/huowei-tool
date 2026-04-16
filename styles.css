@@ -529,7 +529,7 @@ dialog::backdrop {
 
 .pdf-dialog-body {
   display: grid;
-  grid-template-columns: 1fr min(320px, 38vw);
+  grid-template-columns: 1fr min(380px, 44vw);
   gap: 16px;
   align-items: start;
 }
@@ -547,82 +547,219 @@ dialog::backdrop {
   font-weight: 600;
 }
 
+.pdf-preview-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.pdf-preview-toolbar-hint {
+  font-size: 11px;
+  color: #6b7280;
+  line-height: 1.4;
+  flex: 1;
+  min-width: 140px;
+}
+
+.ghost-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+}
+
+.ghost-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+
 .pdf-preview-host {
   background: #e5e7eb;
   border-radius: 8px;
   padding: 12px;
-  min-height: 200px;
+  min-height: 240px;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
+  overflow: auto;
+  max-height: min(58vh, 520px);
 }
 
-.pdf-preview-paper {
-  position: relative;
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  border: 1px solid #d1d5db;
-  flex-shrink: 0;
-}
-
-.pdf-preview-frame {
+.pdf-edit-wrap {
   width: 100%;
-  height: 220px;
-  border: 0;
-  border-radius: 6px;
-  background: #fff;
+  max-width: 100%;
 }
 
-.pdf-preview-label {
-  position: absolute;
-  border: 1px solid #9ca3af;
-  box-sizing: border-box;
-  display: flex;
+.pdf-edit-stage {
+  width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  background: #cbd5e1;
+  border-radius: 8px;
+  border: 1px solid #94a3b8;
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.5);
+}
+
+.pdf-edit-paper {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  border-radius: 6px;
   overflow: hidden;
 }
 
-.pdf-preview-label.vertical {
-  flex-direction: column;
+.pdf-edit-paper--full {
+  border-radius: 6px;
 }
 
-.pdf-preview-label.horizontal {
-  flex-direction: row;
+.pdf-preview-stack {
+  position: relative;
+  width: 100%;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
 }
 
-.pdf-preview-barcode {
+.pdf-preview-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.pdf-preview-drag-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.pdf-preview-drag-layer .pdf-edit-el {
+  pointer-events: auto;
+}
+
+.pdf-edit-overlay-hit.pdf-edit-barcode,
+.pdf-edit-overlay-hit.pdf-edit-text {
+  background: transparent;
+  border: 1px dashed rgba(100, 116, 139, 0.5);
+}
+
+.pdf-edit-overlay-hit.pdf-edit-barcode {
+  padding: 0;
+}
+
+.pdf-edit-overlay-hit.is-selected {
+  border-color: transparent;
+}
+
+.pdf-form-section-title {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+  letter-spacing: 0.02em;
+}
+
+.pdf-form-section-title:first-child {
+  margin-top: 0;
+}
+
+.pdf-barcode-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #4b5563;
+}
+
+.pdf-edit-label {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px dashed #64748b;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.pdf-edit-el {
+  position: absolute;
+  box-sizing: border-box;
+  cursor: grab;
+  touch-action: none;
+}
+
+.pdf-edit-el:active {
+  cursor: grabbing;
+}
+
+.pdf-edit-barcode {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  box-sizing: border-box;
+  padding: 2px;
+  background: rgba(255, 255, 255, 0.9);
 }
 
-.pdf-preview-barcode img {
+.pdf-edit-barcode img {
   max-width: 100%;
   max-height: 100%;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+  pointer-events: none;
 }
 
-.pdf-preview-code {
-  font-family: Helvetica, Arial, sans-serif;
-  font-weight: 700;
-  text-align: center;
+.pdf-edit-text {
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex: 1;
-  box-sizing: border-box;
-  overflow: hidden;
+  padding: 2px 4px;
+  background: rgba(249, 250, 251, 0.95);
 }
 
-.pdf-preview-code-line {
-  white-space: nowrap;
+.pdf-edit-text-inner {
+  font-family: Helvetica, Arial, "PingFang SC", sans-serif;
+  font-weight: 700;
   text-align: center;
-  width: 100%;
+  line-height: 1.2;
+  color: #111827;
   overflow: hidden;
-  text-overflow: clip;
+  max-height: 100%;
+  width: 100%;
+}
+
+.pdf-edit-text-line {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pdf-edit-el.is-selected {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+  z-index: 2;
+}
+
+.pdf-edit-drag-handle {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: #2563eb;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+
+.pdf-edit-el.is-selected .pdf-edit-drag-handle {
+  background: #1d4ed8;
 }
 
 #pdfSettingsForm h3 {
@@ -690,7 +827,7 @@ dialog::backdrop {
 .mini-map-content {
   padding: 10px;
   overflow: auto;
-  max-height: calc(100vh - 170px);
+  max-height: calc(100vh - 240px);
 }
 
 .mini-map-toolbar {
@@ -709,6 +846,56 @@ dialog::backdrop {
   background: #1f2937;
   color: #f9fafb;
   border-color: #4b5563;
+}
+
+.mini-map-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.mini-map-toolbar-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.mini-map-toolbar-dims {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.mini-map-toolbar-dims input[type="number"] {
+  width: 56px;
+  padding: 4px 6px;
+  font-size: 12px;
+  border-radius: 4px;
+  border: 1px solid #4b5563;
+  background: #111827;
+  color: #f9fafb;
+}
+
+.mini-map-toolbar-dims button {
+  padding: 5px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid #4b5563;
+  background: #1f2937;
+  color: #e5e7eb;
+  cursor: pointer;
+}
+
+.mini-map-toolbar-dims button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.mini-map-toolbar-dims button:not(:disabled):hover {
+  background: #374151;
 }
 
 .mini-map-interaction-hint {
@@ -855,6 +1042,102 @@ dialog::backdrop {
   padding: 10px 14px;
   font-size: 12px;
   color: #9ca3af;
+}
+
+.mini-map-context-menu .context-menu-rc-btn {
+  font-weight: 600;
+  color: #fde68a;
+}
+
+.mini-map-context-menu .context-menu-sep {
+  height: 1px;
+  background: #374151;
+  margin: 6px 0;
+}
+
+.mini-map-context-menu .context-menu-hint {
+  padding: 6px 14px 10px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #9ca3af;
+}
+
+.mini-map-context-menu .context-menu-numeric {
+  padding: 8px 14px 10px;
+  border-top: 1px solid #374151;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mini-map-context-menu .context-menu-numeric-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: #e5e7eb;
+}
+
+.mini-map-context-menu .context-menu-numeric-input {
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #4b5563;
+  background: #111827;
+  color: #f9fafb;
+  font-size: 14px;
+}
+
+.mini-map-context-menu .context-menu-numeric-btn {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid #60a5fa;
+  background: #1d4ed8;
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mini-map-rc-dialog {
+  border: none;
+  border-radius: 10px;
+  padding: 0;
+  max-width: 92vw;
+}
+
+.mini-map-rc-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.mini-map-rc-dialog form {
+  padding: 18px 20px;
+  min-width: 280px;
+}
+
+.mini-map-rc-dialog h3 {
+  margin: 0 0 8px;
+}
+
+.mini-map-rc-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 12px 0 4px;
+}
+
+.mini-map-rc-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #374151;
+}
+
+.mini-map-rc-fields input {
+  padding: 8px 10px;
+  font-size: 14px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
 }
 
 body.mini-map-collapsed .container {

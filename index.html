@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>货位编码工具</title>
   <!-- 发版时只需修改这一处版本号（用于页面展示 + 静态资源缓存刷新） -->
-  <meta name="app-version" content="10.0.2">
-  <link rel="stylesheet" href="./styles.css?v=10.0.2">
+  <meta name="app-version" content="12.0.4">
+  <link rel="stylesheet" href="./styles.css?v=12.0.4">
 </head>
 <body>
   <div class="container">
     <header class="header">
       <div class="header-main">
         <h1>货位编码工具</h1>
-        <p>货位码编码 + Excel 导出 + 标签 PDF 导出 <span class="app-version">V10.0.2</span></p>
+        <p>货位码编码 + Excel 导出 + 标签 PDF 导出 <span class="app-version">V12.0.4</span></p>
       </div>
       <button type="button" id="openTutorialBtn" class="tutorial-open-btn">查看使用教程</button>
     </header>
@@ -49,9 +49,11 @@
       <button id="toggleMiniMapBtn" type="button">收起</button>
     </div>
     <div class="mini-map-toolbar">
-      <label for="miniMapViewFieldSelect">视图字段</label>
-      <select id="miniMapViewFieldSelect"></select>
-      <p class="mini-map-interaction-hint">货架：单击选中并定位工作区；拖拽框选；Ctrl/Cmd+点击加选；有选中时右键可批量改当前视图字段。</p>
+      <div class="mini-map-toolbar-row">
+        <label for="miniMapViewFieldSelect">视图字段</label>
+        <select id="miniMapViewFieldSelect"></select>
+      </div>
+      <p class="mini-map-interaction-hint">货架：单击选中并定位工作区；拖拽框选；Ctrl/Cmd+点击加选。视图选「行数/列数」或业务字段时，有选中可右键批量修改。</p>
     </div>
     <div id="miniMapContent" class="mini-map-content"></div>
     <div id="miniMapRubberBand" class="mini-map-rubber-band" hidden aria-hidden="true"></div>
@@ -64,26 +66,14 @@
 
       <div class="pdf-dialog-body">
         <div class="pdf-form-column">
+          <p class="pdf-form-section-title">纸张尺寸（mm）</p>
           <div class="form-grid">
-            <label>标签尺寸模式
-              <select id="labelSizeMode">
-                <option value="custom">自定义(mm)</option>
-                <option value="a4">A4</option>
-                <option value="a3">A3</option>
-              </select>
-            </label>
-            <label>纸张尺寸模式
+            <label>纸张模板
               <select id="paperSizeMode">
-                <option value="custom">自定义(mm)</option>
-                <option value="a4" selected>A4</option>
-                <option value="a3">A3</option>
+                <option value="custom">自定义（请在下方填写长、宽）</option>
+                <option value="a4" selected>A4（210×297）</option>
+                <option value="a3">A3（297×420）</option>
               </select>
-            </label>
-            <label>标签宽(mm)
-              <input id="labelWidth" type="number" min="10" step="1" value="90">
-            </label>
-            <label>标签高(mm)
-              <input id="labelHeight" type="number" min="10" step="1" value="60">
             </label>
             <label>纸张宽(mm)
               <input id="paperWidth" type="number" min="10" step="1" value="210">
@@ -91,41 +81,52 @@
             <label>纸张高(mm)
               <input id="paperHeight" type="number" min="10" step="1" value="297">
             </label>
-            <label>排布方向
-              <select id="layoutDirection">
-                <option value="vertical">上下排布</option>
-                <option value="horizontal">左右排布</option>
-              </select>
+          </div>
+          <p class="pdf-form-section-title">条码区块尺寸（mm）</p>
+          <div class="form-grid">
+            <label>条码宽（水平方向）
+              <input id="barcodeBlockWidthMm" type="number" min="8" step="1" value="72">
             </label>
-            <label>上下排布时：顶部内容
-              <select id="verticalTopContent">
-                <option value="barcode">条码在上</option>
-                <option value="text">编码在上</option>
-              </select>
+            <label>条码高（垂直方向）
+              <input id="barcodeBlockHeightMm" type="number" min="6" step="1" value="28">
             </label>
-            <label>左右排布时：左侧内容
-              <select id="horizontalLeftContent">
-                <option value="barcode">条码在左</option>
-                <option value="text">编码在左</option>
-              </select>
+          </div>
+          <p class="hint pdf-barcode-hint">条码在区块内<strong>等比例放大至最大</strong>后居中；扫码只依赖编码内容与条宽比例，<strong>整体等比缩放不改变识别结果</strong>。请勿只横向拉扁/拉高（会破坏宽窄条比例）。若条码天然偏「扁长」，宽区会略留边属正常。</p>
+          <p class="pdf-form-section-title">货位码标识区块尺寸（mm）</p>
+          <div class="form-grid">
+            <label>标识区块宽
+              <input id="textBlockWidthMm" type="number" min="8" step="1" value="80">
             </label>
-            <label>编码字体大小(pt)
-              <input id="codeFontSize" type="number" min="8" max="72" value="24">
+            <label>标识区块高
+              <input id="textBlockHeightMm" type="number" min="6" step="1" value="22">
             </label>
-            <label>区域-货架连接符（仅影响标签文字）
+          </div>
+          <p class="pdf-form-section-title">字体</p>
+          <div class="form-grid">
+            <label>字体大小(pt)
+              <input id="codeFontSize" type="number" min="6" max="999" step="1" value="14">
+            </label>
+          </div>
+          <p class="pdf-form-section-title">连接符（仅影响标识文字，不影响扫码内容）</p>
+          <div class="form-grid">
+            <label>区域-货架
               <input id="sepRegionShelf" type="text" maxlength="2" value="-">
             </label>
-            <label>货架-层级连接符（仅影响标签文字）
+            <label>货架-层级
               <input id="sepShelfLevel" type="text" maxlength="2" value="-">
             </label>
-            <label>层级-货道连接符（仅影响标签文字）
+            <label>层级-货道
               <input id="sepLevelAisle" type="text" maxlength="2" value="-">
             </label>
           </div>
-      <p class="hint">连接符输入空格将被视为换行（仅作用于标签文字展示）。条码内容固定按「区域-货架-层级-货道」生成，不受连接符设置影响。</p>
+          <p class="hint">连接符输入空格视为换行（仅标识文字）。条码扫描内容固定为「区域-货架-层级-货道」短横线格式。右侧画布可拖动条码与标识在整张纸上的位置；尺寸由上方数字控制。</p>
         </div>
         <div class="pdf-preview-column">
-          <p class="pdf-preview-title">打印预览（示意，与导出 PDF 排版一致）</p>
+          <p class="pdf-preview-title">打印画布（整张纸，与导出 PDF 一致）</p>
+          <div class="pdf-preview-toolbar">
+            <button type="button" id="resetPdfLayoutBtn" class="ghost-btn">恢复默认位置</button>
+            <span class="pdf-preview-toolbar-hint">底层为与导出相同的 PDF 单页（PDF.js 栅格化至画布，与虚线拖动层对齐）；改左侧参数不会移动已摆好的位置；仅「恢复默认位置」重新居中。</span>
+          </div>
           <div id="pdfPreviewHost" class="pdf-preview-host" aria-live="polite"></div>
         </div>
       </div>
@@ -169,7 +170,7 @@
             <li><strong>货道编号</strong>：列号，两位，如 <code>01</code>～<code>99</code></li>
           </ul>
           <p class="tutorial-example">示例（默认连接符）：<code>A-01-05-06</code> 表示 A 区、01 号货架、第 5 行、第 6 列货道。</p>
-          <p class="tutorial-note">PDF 里若把某连接符打成<strong>空格</strong>，标签上的<strong>可见文字</strong>会在该处换行；条码仍使用不含换行的连续字符串。</p>
+          <p class="tutorial-note">PDF 里若把某连接符打成<strong>空格</strong>，标签上的<strong>可见文字</strong>会在该处换行；条码内容固定为「区域-货架-层级-货道」四段短横线拼接。</p>
         </section>
         <section class="tutorial-section">
           <h4>三、业务字段（货架维度）</h4>
@@ -192,12 +193,12 @@
         </section>
         <section class="tutorial-section">
           <h4>五、区域缩略图</h4>
-          <p>右侧面板按货架格子展示当前「视图字段」的取值；可<strong>收起 / 展开</strong>。</p>
+          <p>右侧面板「视图字段」可选<strong>业务字段</strong>、<strong>行数</strong>或<strong>列数</strong>，格子中展示对应取值；可<strong>收起 / 展开</strong>。</p>
           <ul>
             <li><strong>单击</strong>货架格：选中并滚动到对应货架配置。</li>
             <li><strong>拖拽框选</strong>：批量选中多个货架格。</li>
             <li><strong>Ctrl / Cmd + 单击</strong>：加减多选。</li>
-            <li>有选中时<strong>右键</strong>：可批量把选中格的「当前视图字段」改成同一枚举值。</li>
+            <li>有选中时<strong>右键</strong>：按当前视图类型批量修改（行数、列数或业务枚举）。</li>
           </ul>
         </section>
         <section class="tutorial-section">
@@ -221,11 +222,12 @@
           </ul>
         </section>
         <section class="tutorial-section">
-          <h4>八、导出货位码标签 PDF</h4>
+          <h4>八、导出货位码标签 PDF（V12）</h4>
           <ol>
-            <li>点击「导出货位码标签 PDF」，在弹窗中设置标签尺寸、纸张尺寸、排布方向、条码与文字的左右/上下关系、编码字号、各段连接符等。</li>
-            <li>右侧为<strong>打印预览示意</strong>，与导出 PDF 排版一致。</li>
-            <li>确认后「生成 PDF」：每个货位<strong>单独一页</strong>，条码为 <strong>CODE128</strong>，便于一页一张标签纸打印。连接符设置仅影响标签文字显示，不改变条码内容。</li>
+            <li>设置<strong>纸张</strong>、<strong>条码/标识区块长宽</strong>、<strong>字体大小（pt）</strong>及连接符；预览区字号与导出按同一 pt→比例换算，与左侧一致。</li>
+            <li>条码在区块内<strong>等比缩放至最大</strong>；区块很扁时两侧可能仍略有余白（与编码长度有关）。整体等比放大缩小一般不影响扫码。</li>
+            <li>右侧为<strong>整张纸画布</strong>：用 PDF.js 将导出同源单页画在画布上，与虚线拖动框对齐；「恢复默认位置」按当前尺寸重新居中摆放。</li>
+            <li>「生成 PDF」每货位一页；条码为 <strong>CODE128</strong>，扫码内容固定为「区域-货架-层级-货道」短横线格式。</li>
           </ol>
         </section>
         <section class="tutorial-section">
@@ -256,6 +258,7 @@
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-  <script src="./app.js?v=10.0.2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+  <script src="./app.js?v=12.0.4"></script>
 </body>
 </html>
