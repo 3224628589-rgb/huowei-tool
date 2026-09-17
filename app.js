@@ -34,11 +34,12 @@ let pdfExportInProgress = false;
 let pdfExportCancelRequested = false;
 
 /**
- * 条码图片会嵌入 PDF；把超大导出拆成多个文件，避免单个 jsPDF 文档占满浏览器内存。
- * 每份 120 页通常既方便打印，也能让最终序列化阶段保持在可响应的范围内。
+ * 条码图片会嵌入 PDF；主线程每批只保留 120 页，交由后台线程逐批汇总。
+ * 这样既避免页面卡死，也能维持最终只下载一个 PDF 文件。
  */
-const PDF_EXPORT_MAX_PAGES_PER_FILE = 120;
+const PDF_EXPORT_BATCH_PAGES = 120;
 const PDF_EXPORT_YIELD_EVERY_PAGES = 6;
+const PDF_MERGE_WORKER_LIBRARY = "https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js";
 
 function cancelPdfPreviewDragRasterize() {
   if (pdfPreviewDragRasterTimer) {
@@ -73,12 +74,12 @@ function yieldToBrowser() {
   });
 }
 
-function setPdfExportBusy(busy, done = 0, total = 0, fileIndex = 0, fileCount = 0) {
+function setPdfExportBusy(busy, done = 0, total = 0, batchIndex = 0, batchCount = 0, phase = "生成中") {
   const btn = document.getElementById("confirmPdfBtn");
   if (btn) {
     btn.disabled = busy;
-    const fileProgress = fileCount > 1 ? ` · 第 ${fileIndex}/${fileCount} 份` : "";
-    btn.textContent = busy && total ? `生成中 ${done}/${total}${fileProgress}` : busy ? "生成中..." : "生成 PDF";
+    const batchProgress = batchCount > 1 ? ` · 第 ${batchIndex}/${batchCount} 批` : "";
+    btn.textContent = busy && total ? `${phase} ${done}/${total}${batchProgress}` : busy ? `${phase}...` : "生成 PDF";
   }
 
   const cancelBtn = document.getElementById("cancelPdfBtn");
@@ -1043,6 +1044,111 @@ function performExcelExport() {
   return true;
 }
 
+function waitForPdfMergeWorkerMessage(worker, expectedType) {
+  return new Promise((resolve, reject) => {
+    const cleanUp = () => {
+      worker.removeEventListener("message", onMessage);
+      worker.removeEventListener("error", onError);
+      worker.removeEventListener("messageerror", onMessageError);
+    };
+    const onMessage = (event) => {
+      const data = event.data || {};
+      if (data.type === "error") {
+        cleanUp();
+        reject(new Error(data.message || "PDF 汇总线程执行失败。"));
+      } else if (data.type === expectedType) {
+        cleanUp();
+        resolve(data);
+      }
+    };
+    const onError = (event) => {
+      cleanUp();
+      reject(new Error(event.message || "PDF 汇总线程加载失败。"));
+    };
+    const onMessageError = () => {
+      cleanUp();
+      reject(new Error("PDF 汇总线程返回的数据无法读取。"));
+    };
+    worker.addEventListener("message", onMessage);
+    worker.addEventListener("error", onError);
+    worker.addEventListener("messageerror", onMessageError);
+  });
+}
+
+/**
+ * 每批 jsPDF 先在主线程生成，再转移给 Worker 合并。转移后主线程不再持有该批字节，
+ * 因此总页数很大时仍不会把页面内存和渲染线程拖住。
+ */
+async function createPdfMergeWorker() {
+  const workerSource = `
+    try {
+      importScripts("${PDF_MERGE_WORKER_LIBRARY}");
+      if (!self.PDFLib) throw new Error("PDF 汇总组件未加载。");
+      const mergedPdfPromise = self.PDFLib.PDFDocument.create();
+
+      self.onmessage = async (event) => {
+        try {
+          const data = event.data || {};
+          const mergedPdf = await mergedPdfPromise;
+          if (data.type === "append") {
+            const sourcePdf = await self.PDFLib.PDFDocument.load(data.bytes);
+            const copiedPages = await mergedPdf.copyPages(sourcePdf, sourcePdf.getPageIndices());
+            copiedPages.forEach((page) => mergedPdf.addPage(page));
+            self.postMessage({ type: "appended", batchIndex: data.batchIndex });
+            return;
+          }
+          if (data.type === "finish") {
+            const bytes = await mergedPdf.save({ useObjectStreams: true });
+            self.postMessage({ type: "complete", bytes: bytes.buffer }, [bytes.buffer]);
+          }
+        } catch (error) {
+          self.postMessage({ type: "error", message: error && error.message ? error.message : String(error) });
+        }
+      };
+      self.postMessage({ type: "ready" });
+    } catch (error) {
+      self.postMessage({ type: "error", message: error && error.message ? error.message : String(error) });
+    }
+  `;
+  const sourceUrl = URL.createObjectURL(new Blob([workerSource], { type: "application/javascript" }));
+  const worker = new Worker(sourceUrl);
+  try {
+    await waitForPdfMergeWorkerMessage(worker, "ready");
+  } catch (err) {
+    worker.terminate();
+    URL.revokeObjectURL(sourceUrl);
+    throw err;
+  }
+
+  return {
+    async append(bytes, batchIndex) {
+      const result = waitForPdfMergeWorkerMessage(worker, "appended");
+      worker.postMessage({ type: "append", bytes, batchIndex }, [bytes]);
+      return result;
+    },
+    async finish() {
+      const result = waitForPdfMergeWorkerMessage(worker, "complete");
+      worker.postMessage({ type: "finish" });
+      return result.bytes;
+    },
+    dispose() {
+      worker.terminate();
+      URL.revokeObjectURL(sourceUrl);
+    }
+  };
+}
+
+function downloadPdfBytes(bytes, filename) {
+  const objectUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 15000);
+}
+
 async function exportPdf() {
   if (pdfExportInProgress) return false;
   const rows = buildLocationRows();
@@ -1066,6 +1172,7 @@ async function exportPdf() {
   }
   setPdfExportBusy(true, 0, rows.length);
 
+  let pdfMerger = null;
   try {
     await yieldToBrowser();
     const { jsPDF } = window.jspdf;
@@ -1073,16 +1180,17 @@ async function exportPdf() {
     ensurePdfPrintLayoutState(paper);
     const pdfSettings = readPdfSettingsForExport();
     const orientation = paper.w >= paper.h ? "landscape" : "portrait";
+    pdfMerger = await createPdfMergeWorker();
 
     // 预览和旧批次条码不应占用本次大导出的内存。
     makeBarcodeAssetCache.clear();
-    const fileCount = Math.ceil(rows.length / PDF_EXPORT_MAX_PAGES_PER_FILE);
+    const batchCount = Math.ceil(rows.length / PDF_EXPORT_BATCH_PAGES);
 
-    for (let fileIndex = 0; fileIndex < fileCount; fileIndex += 1) {
+    for (let batchIndex = 0; batchIndex < batchCount; batchIndex += 1) {
       if (pdfExportCancelRequested) break;
 
-      const start = fileIndex * PDF_EXPORT_MAX_PAGES_PER_FILE;
-      const end = Math.min(rows.length, start + PDF_EXPORT_MAX_PAGES_PER_FILE);
+      const start = batchIndex * PDF_EXPORT_BATCH_PAGES;
+      const end = Math.min(rows.length, start + PDF_EXPORT_BATCH_PAGES);
       let pdf = new jsPDF({
         orientation,
         unit: "mm",
@@ -1096,7 +1204,7 @@ async function exportPdf() {
         appendLocationLabelPageToDoc(pdf, rows[i], pdfSettings);
         const done = i + 1;
         if (done % PDF_EXPORT_YIELD_EVERY_PAGES === 0 || done === end) {
-          setPdfExportBusy(true, done, rows.length, fileIndex + 1, fileCount);
+          setPdfExportBusy(true, done, rows.length, batchIndex + 1, batchCount);
           await yieldToBrowser();
         }
       }
@@ -1106,30 +1214,35 @@ async function exportPdf() {
         break;
       }
 
-      // 一份完成后立刻下载并释放 jsPDF 实例，再构建下一份，避免内存随总页数线性增长。
-      setPdfExportBusy(true, end, rows.length, fileIndex + 1, fileCount);
+      // 该批字节会转移给后台 Worker；主线程随后释放本批 PDF，再开始下一批。
+      setPdfExportBusy(true, end, rows.length, batchIndex + 1, batchCount, "正在汇总");
       await yieldToBrowser();
-      const partSuffix = fileCount > 1 ? `_${String(fileIndex + 1).padStart(3, "0")}-of-${String(fileCount).padStart(3, "0")}` : "";
-      pdf.save(`货位码标签_${nowDateText()}${partSuffix}.pdf`);
+      const bytes = pdf.output("arraybuffer");
       pdf = null;
       makeBarcodeAssetCache.clear();
+      await pdfMerger.append(bytes, batchIndex + 1);
       await yieldToBrowser();
     }
 
     if (pdfExportCancelRequested) {
-      alert("已停止生成。已完成下载的 PDF 会保留，未完成部分不会导出。");
+      alert("已停止生成，未完成的 PDF 不会下载。");
       return false;
     }
 
-    if (fileCount > 1) {
-      alert(`标签数量较多，已自动拆分为 ${fileCount} 个 PDF 文件下载。`);
+    setPdfExportBusy(true, rows.length, rows.length, batchCount, batchCount, "正在合并");
+    const mergedBytes = await pdfMerger.finish();
+    if (pdfExportCancelRequested) {
+      alert("已停止生成，未完成的 PDF 不会下载。");
+      return false;
     }
+    downloadPdfBytes(mergedBytes, `货位码标签_${nowDateText()}.pdf`);
     return true;
   } catch (err) {
     console.error(err);
     alert("生成 PDF 失败，请减少一次导出的货位数量或稍后重试。");
     return false;
   } finally {
+    pdfMerger?.dispose();
     makeBarcodeAssetCache.clear();
     pdfExportInProgress = false;
     pdfExportCancelRequested = false;
