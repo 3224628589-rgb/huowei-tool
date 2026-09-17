@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>货位编码工具</title>
   <!-- 发版时只需修改这一处版本号（用于页面展示 + 静态资源缓存刷新） -->
-  <meta name="app-version" content="12.0.4">
-  <link rel="stylesheet" href="./styles.css?v=12.0.4">
+  <meta name="app-version" content="12.0.6">
+  <link rel="stylesheet" href="./styles.css?v=12.0.6">
 </head>
 <body>
   <div class="container">
     <header class="header">
       <div class="header-main">
         <h1>货位编码工具</h1>
-        <p>货位码编码 + Excel 导出 + 标签 PDF 导出 <span class="app-version">V12.0.4</span></p>
+        <p>货位码编码 + Excel 导出 + 标签 PDF 导出 <span class="app-version">V12.0.6</span></p>
       </div>
       <button type="button" id="openTutorialBtn" class="tutorial-open-btn">查看使用教程</button>
     </header>
@@ -91,7 +91,7 @@
               <input id="barcodeBlockHeightMm" type="number" min="6" step="1" value="28">
             </label>
           </div>
-          <p class="hint pdf-barcode-hint">条码在区块内<strong>等比例放大至最大</strong>后居中；扫码只依赖编码内容与条宽比例，<strong>整体等比缩放不改变识别结果</strong>。请勿只横向拉扁/拉高（会破坏宽窄条比例）。若条码天然偏「扁长」，宽区会略留边属正常。</p>
+          <p class="hint pdf-barcode-hint">条码会按填写的区块宽高铺满导出区域，不额外添加应用层留白；极端宽高比可能裁掉少量边缘静区，请以扫码结果为准。</p>
           <p class="pdf-form-section-title">货位码标识区块尺寸（mm）</p>
           <div class="form-grid">
             <label>标识区块宽
@@ -119,7 +119,7 @@
               <input id="sepLevelAisle" type="text" maxlength="2" value="-">
             </label>
           </div>
-          <p class="hint">连接符输入空格视为换行（仅标识文字）。条码扫描内容固定为「区域-货架-层级-货道」短横线格式。右侧画布可拖动条码与标识在整张纸上的位置；尺寸由上方数字控制。</p>
+          <p class="hint">连接符输入空格视为换行（仅标识文字）。条码扫描内容固定为「区域-货架-层级-货道」短横线格式。右侧画布可拖动条码与标识在整张纸上的位置；尺寸由上方数字控制。超过 120 个标签会自动拆分为多个 PDF，避免浏览器卡死。</p>
         </div>
         <div class="pdf-preview-column">
           <p class="pdf-preview-title">打印画布（整张纸，与导出 PDF 一致）</p>
@@ -227,7 +227,7 @@
             <li>设置<strong>纸张</strong>、<strong>条码/标识区块长宽</strong>、<strong>字体大小（pt）</strong>及连接符；预览区字号与导出按同一 pt→比例换算，与左侧一致。</li>
             <li>条码在区块内<strong>等比缩放至最大</strong>；区块很扁时两侧可能仍略有余白（与编码长度有关）。整体等比放大缩小一般不影响扫码。</li>
             <li>右侧为<strong>整张纸画布</strong>：用 PDF.js 将导出同源单页画在画布上，与虚线拖动框对齐；「恢复默认位置」按当前尺寸重新居中摆放。</li>
-            <li>「生成 PDF」每货位一页；条码为 <strong>CODE128</strong>，扫码内容固定为「区域-货架-层级-货道」短横线格式。</li>
+            <li>「生成 PDF」每货位一页；超过 120 页时会自动拆分为多份下载，可随时点「停止生成」。条码为 <strong>CODE128</strong>，扫码内容固定为「区域-货架-层级-货道」短横线格式。</li>
           </ol>
         </section>
         <section class="tutorial-section">
@@ -259,6 +259,6 @@
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
-  <script src="./app.js?v=12.0.4"></script>
+  <script src="./app.js?v=12.0.6"></script>
 </body>
 </html>

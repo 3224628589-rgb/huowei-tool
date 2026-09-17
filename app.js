@@ -30,6 +30,15 @@ let pdfPreviewResizeObserver = null;
 let pdfPreviewResizeDebounceTimer = null;
 /** 拖动中节流栅格化，避免每帧重画 PDF 导致闪烁 */
 let pdfPreviewDragRasterTimer = null;
+let pdfExportInProgress = false;
+let pdfExportCancelRequested = false;
+
+/**
+ * 条码图片会嵌入 PDF；把超大导出拆成多个文件，避免单个 jsPDF 文档占满浏览器内存。
+ * 每份 120 页通常既方便打印，也能让最终序列化阶段保持在可响应的范围内。
+ */
+const PDF_EXPORT_MAX_PAGES_PER_FILE = 120;
+const PDF_EXPORT_YIELD_EVERY_PAGES = 6;
 
 function cancelPdfPreviewDragRasterize() {
   if (pdfPreviewDragRasterTimer) {
@@ -56,6 +65,26 @@ function disposePdfLivePreviewObservers() {
     pdfPreviewResizeDebounceTimer = null;
   }
   cancelPdfPreviewDragRasterize();
+}
+
+function yieldToBrowser() {
+  return new Promise((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
+function setPdfExportBusy(busy, done = 0, total = 0, fileIndex = 0, fileCount = 0) {
+  const btn = document.getElementById("confirmPdfBtn");
+  if (btn) {
+    btn.disabled = busy;
+    const fileProgress = fileCount > 1 ? ` · 第 ${fileIndex}/${fileCount} 份` : "";
+    btn.textContent = busy && total ? `生成中 ${done}/${total}${fileProgress}` : busy ? "生成中..." : "生成 PDF";
+  }
+
+  const cancelBtn = document.getElementById("cancelPdfBtn");
+  if (!cancelBtn) return;
+  cancelBtn.disabled = false;
+  cancelBtn.textContent = busy ? "停止生成" : "取消";
 }
 
 const EXCEL_CORE_HEADERS = ["区域编号", "货架编号", "层级编号", "货道编号"];
@@ -341,10 +370,20 @@ function bindEvents() {
     dialog.showModal();
     updatePdfPreview();
   });
-  document.getElementById("cancelPdfBtn").addEventListener("click", () => dialog.close());
-  document.getElementById("pdfSettingsForm").addEventListener("submit", (e) => {
+  document.getElementById("cancelPdfBtn").addEventListener("click", () => {
+    if (!pdfExportInProgress) {
+      dialog.close();
+      return;
+    }
+    pdfExportCancelRequested = true;
+    const cancelBtn = document.getElementById("cancelPdfBtn");
+    cancelBtn.disabled = true;
+    cancelBtn.textContent = "正在停止…";
+  });
+  document.getElementById("pdfSettingsForm").addEventListener("submit", async (e) => {
     e.preventDefault();
-    exportPdf();
+    const ok = await exportPdf();
+    if (!ok) return;
     schedulePersist();
     dialog.close();
   });
@@ -1005,29 +1044,97 @@ function performExcelExport() {
 }
 
 async function exportPdf() {
+  if (pdfExportInProgress) return false;
   const rows = buildLocationRows();
   if (!rows.length) {
     alert("暂无可导出的货位编码。");
-    return;
+    return false;
   }
 
-  const { jsPDF } = window.jspdf;
-  const paper = readPaperMmSize();
-  ensurePdfPrintLayoutState(paper);
-  const pdfSettings = readPdfSettingsForExport();
-
-  const pdf = new jsPDF({
-    orientation: paper.w >= paper.h ? "landscape" : "portrait",
-    unit: "mm",
-    format: [paper.w, paper.h]
-  });
-
-  for (let i = 0; i < rows.length; i += 1) {
-    if (i > 0) pdf.addPage([paper.w, paper.h], paper.w >= paper.h ? "landscape" : "portrait");
-    appendLocationLabelPageToDoc(pdf, rows[i], pdfSettings);
+  if (!window.jspdf) {
+    alert("PDF 组件未加载完成，请稍后重试。");
+    return false;
   }
 
-  pdf.save(`货位码标签_${nowDateText()}.pdf`);
+  pdfExportInProgress = true;
+  pdfExportCancelRequested = false;
+  pdfPreviewRenderGen += 1;
+  disposePdfLivePreviewObservers();
+  if (pdfPreviewRenderRaf) {
+    cancelAnimationFrame(pdfPreviewRenderRaf);
+    pdfPreviewRenderRaf = null;
+  }
+  setPdfExportBusy(true, 0, rows.length);
+
+  try {
+    await yieldToBrowser();
+    const { jsPDF } = window.jspdf;
+    const paper = readPaperMmSize();
+    ensurePdfPrintLayoutState(paper);
+    const pdfSettings = readPdfSettingsForExport();
+    const orientation = paper.w >= paper.h ? "landscape" : "portrait";
+
+    // 预览和旧批次条码不应占用本次大导出的内存。
+    makeBarcodeAssetCache.clear();
+    const fileCount = Math.ceil(rows.length / PDF_EXPORT_MAX_PAGES_PER_FILE);
+
+    for (let fileIndex = 0; fileIndex < fileCount; fileIndex += 1) {
+      if (pdfExportCancelRequested) break;
+
+      const start = fileIndex * PDF_EXPORT_MAX_PAGES_PER_FILE;
+      const end = Math.min(rows.length, start + PDF_EXPORT_MAX_PAGES_PER_FILE);
+      let pdf = new jsPDF({
+        orientation,
+        unit: "mm",
+        format: [paper.w, paper.h],
+        compress: true
+      });
+
+      for (let i = start; i < end; i += 1) {
+        if (pdfExportCancelRequested) break;
+        if (i > start) pdf.addPage([paper.w, paper.h], orientation);
+        appendLocationLabelPageToDoc(pdf, rows[i], pdfSettings);
+        const done = i + 1;
+        if (done % PDF_EXPORT_YIELD_EVERY_PAGES === 0 || done === end) {
+          setPdfExportBusy(true, done, rows.length, fileIndex + 1, fileCount);
+          await yieldToBrowser();
+        }
+      }
+
+      if (pdfExportCancelRequested) {
+        pdf = null;
+        break;
+      }
+
+      // 一份完成后立刻下载并释放 jsPDF 实例，再构建下一份，避免内存随总页数线性增长。
+      setPdfExportBusy(true, end, rows.length, fileIndex + 1, fileCount);
+      await yieldToBrowser();
+      const partSuffix = fileCount > 1 ? `_${String(fileIndex + 1).padStart(3, "0")}-of-${String(fileCount).padStart(3, "0")}` : "";
+      pdf.save(`货位码标签_${nowDateText()}${partSuffix}.pdf`);
+      pdf = null;
+      makeBarcodeAssetCache.clear();
+      await yieldToBrowser();
+    }
+
+    if (pdfExportCancelRequested) {
+      alert("已停止生成。已完成下载的 PDF 会保留，未完成部分不会导出。");
+      return false;
+    }
+
+    if (fileCount > 1) {
+      alert(`标签数量较多，已自动拆分为 ${fileCount} 个 PDF 文件下载。`);
+    }
+    return true;
+  } catch (err) {
+    console.error(err);
+    alert("生成 PDF 失败，请减少一次导出的货位数量或稍后重试。");
+    return false;
+  } finally {
+    makeBarcodeAssetCache.clear();
+    pdfExportInProgress = false;
+    pdfExportCancelRequested = false;
+    setPdfExportBusy(false);
+  }
 }
 
 function readPaperMmSize() {
@@ -1618,49 +1725,28 @@ function makeBarcode(code, boxWmm, boxHmm) {
     return makeBarcodeAssetCache.get(cacheKey);
   }
 
-  const targetAr = W / H;
-  let bestCanvas = null;
-  let bestScore = -1;
-
-  for (let lineW = 1; lineW <= 8; lineW += 1) {
-    for (let hPx = 24; hPx <= 240; hPx += 4) {
-      const canvas = document.createElement("canvas");
-      try {
-        JsBarcode(canvas, code, {
-          format: "CODE128",
-          lineColor: "#000",
-          width: lineW,
-          height: hPx,
-          displayValue: false,
-          margin: 0
-        });
-      } catch {
-        continue;
-      }
-      const cw = canvas.width;
-      const ch = canvas.height;
-      if (!cw || !ch) continue;
-      const ar = cw / ch;
-      const fit = Math.min(targetAr / ar, ar / targetAr);
-      const score = fit + cw * ch * 1e-9;
-      if (score > bestScore) {
-        bestScore = score;
-        bestCanvas = canvas;
-      }
-    }
-  }
-
-  if (!bestCanvas) {
+  const makeCanvas = (lineWidth, heightPx) => {
     const c = document.createElement("canvas");
     JsBarcode(c, code, {
       format: "CODE128",
       lineColor: "#000",
-      width: 2,
-      height: 80,
+      width: lineWidth,
+      height: heightPx,
       displayValue: false,
       margin: 0
     });
-    bestCanvas = c;
+    return c;
+  };
+
+  let bestCanvas;
+  try {
+    const targetAr = W / H;
+    const lineWidth = 3;
+    const probe = trimCanvasTransparent(makeCanvas(lineWidth, 120));
+    const fittedHeight = Math.min(900, Math.max(24, Math.round(probe.width / targetAr)));
+    bestCanvas = makeCanvas(lineWidth, fittedHeight);
+  } catch {
+    bestCanvas = makeCanvas(2, 120);
   }
 
   const composed = composeBarcodeToBoxAspect(bestCanvas, W, H);
