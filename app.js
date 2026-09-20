@@ -1099,7 +1099,9 @@ async function createPdfMergeWorker() {
           }
           if (data.type === "finish") {
             const bytes = await mergedPdf.save({ useObjectStreams: true });
-            self.postMessage({ type: "complete", bytes: bytes.buffer }, [bytes.buffer]);
+            // Uint8Array 的底层 buffer 可能包含未使用的首尾字节；切成精确 ArrayBuffer 再传递。
+            const output = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+            self.postMessage({ type: "complete", bytes: output }, [output]);
           }
         } catch (error) {
           self.postMessage({ type: "error", message: error && error.message ? error.message : String(error) });
@@ -1129,7 +1131,11 @@ async function createPdfMergeWorker() {
     async finish() {
       const result = waitForPdfMergeWorkerMessage(worker, "complete");
       worker.postMessage({ type: "finish" });
-      return result.bytes;
+      const complete = await result;
+      if (!(complete.bytes instanceof ArrayBuffer) && !ArrayBuffer.isView(complete.bytes)) {
+        throw new Error("PDF 汇总结果为空，已阻止下载损坏文件。");
+      }
+      return complete.bytes;
     },
     dispose() {
       worker.terminate();
@@ -1139,7 +1145,16 @@ async function createPdfMergeWorker() {
 }
 
 function downloadPdfBytes(bytes, filename) {
-  const objectUrl = URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+  const normalized = bytes instanceof ArrayBuffer
+    ? new Uint8Array(bytes)
+    : ArrayBuffer.isView(bytes)
+      ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+      : null;
+  const pdfSignature = [0x25, 0x50, 0x44, 0x46, 0x2d]; // %PDF-
+  if (!normalized || normalized.byteLength < pdfSignature.length || !pdfSignature.every((byte, index) => normalized[index] === byte)) {
+    throw new Error("PDF 汇总结果无效，已阻止下载损坏文件。");
+  }
+  const objectUrl = URL.createObjectURL(new Blob([normalized], { type: "application/pdf" }));
   const link = document.createElement("a");
   link.href = objectUrl;
   link.download = filename;
